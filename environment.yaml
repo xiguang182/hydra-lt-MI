@@ -28,11 +28,11 @@ dependencies:
   - torchmetrics=0.*
   - hydra-core=1.*
   - rich=13.*
-  - pre-commit=3.*
-  - pytest=7.*
+  # - pre-commit=3.*
+  # - pytest=7.*
 
   # --------- loggers --------- #
-  # - wandb
+  - wandb
   # - neptune-client
   # - mlflow
   # - comet-ml
