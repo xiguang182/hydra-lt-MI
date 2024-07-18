@@ -72,12 +72,15 @@ class BiLSTMLayer(nn.Module):
         :return: The output tensor.
         """
         # hiden state and cell state are not used
-        x, (_, _) = self.bilstm(x)
-        return x
+        # x, (_, _) = self.bilstm(x)
+        # the base line uses the hidden layer as the output
+        return self.bilstm(x)
 
 
 if __name__ == "__main__":
     # _ = SimpleDenseNet()
     a = torch.rand((5,769))
-    model = BiLSTMLayer()
-    print(model(a).shape)
+    model = BiLSTMLayer() 
+    output, (hd, _) = model(a)
+    print(output.shape)
+    print(hd.shape)
