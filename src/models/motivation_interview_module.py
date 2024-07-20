@@ -6,7 +6,7 @@ from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
 
 
-class MNISTLitModule(LightningModule):
+class MILitModule(LightningModule):
     """Example of a `LightningModule` for MNIST classification.
 
     A `LightningModule` implements 8 key methods:
@@ -64,9 +64,9 @@ class MNISTLitModule(LightningModule):
         self.criterion = torch.nn.CrossEntropyLoss()
 
         # metric objects for calculating and averaging accuracy across batches
-        self.train_acc = Accuracy(task="multiclass", num_classes=10)
-        self.val_acc = Accuracy(task="multiclass", num_classes=10)
-        self.test_acc = Accuracy(task="multiclass", num_classes=10)
+        self.train_acc = Accuracy(task="multiclass", num_classes=2)
+        self.val_acc = Accuracy(task="multiclass", num_classes=2)
+        self.test_acc = Accuracy(task="multiclass", num_classes=2)
 
         # for averaging loss across batches
         self.train_loss = MeanMetric()
@@ -92,19 +92,24 @@ class MNISTLitModule(LightningModule):
         self.val_acc.reset()
         self.val_acc_best.reset()
 
+# best practice for multiple input dataloader?
     def model_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor]
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Perform a single model step on a batch of data.
 
-        :param batch: A batch of data (a tuple) containing the input tensor of images and target labels.
+        :param batch: A batch of data (a tuple) containing the input tensor of RoBERTa and two persons' Openface and target labels.
 
         :return: A tuple containing (in order):
             - A tensor of losses.
             - A tensor of predictions.
             - A tensor of target labels.
         """
-        x, y = batch
+        # if dataset is (x1, x2, x3, y), will it be Batch_size x (x1, x2, x3, y) ? or (Batch_size x x1, Batch_size x x2, Batch_size x x3, Batch_size x y) ?
+        """
+        In PyTorch, when you use a DataLoader with a dataset structured as (x1, x2, x3, y), the DataLoader will return batches in the format (Batch_size x x1, Batch_size x x2, Batch_size x x3, Batch_size x y).
+        """
+        x1, x2, x3, y = batch
         logits = self.forward(x)
         loss = self.criterion(logits, y)
         preds = torch.argmax(logits, dim=1)
@@ -214,4 +219,4 @@ class MNISTLitModule(LightningModule):
 
 
 if __name__ == "__main__":
-    _ = MNISTLitModule(None, None, None, None)
+    _ = MILitModule(None, None, None, None)
