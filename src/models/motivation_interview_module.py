@@ -93,8 +93,10 @@ class MILitModule(LightningModule):
         self.val_acc_best.reset()
 
 # best practice for multiple input dataloader?
+# might need to change the input batch to a tuple of arbitrary length and unpack it with considitions. For different input numbers like only one person, only language, etc.
+# Currently it takes 4 tensors, 3 inputs and 1 target.Refer playground snippet for arbitrary number of inputs.
     def model_step(
-        self, batch: Tuple[torch.Tensor, torch.Tensor]
+        self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Perform a single model step on a batch of data.
 
@@ -108,15 +110,16 @@ class MILitModule(LightningModule):
         # if dataset is (x1, x2, x3, y), will it be Batch_size x (x1, x2, x3, y) ? or (Batch_size x x1, Batch_size x x2, Batch_size x x3, Batch_size x y) ?
         """
         In PyTorch, when you use a DataLoader with a dataset structured as (x1, x2, x3, y), the DataLoader will return batches in the format (Batch_size x x1, Batch_size x x2, Batch_size x x3, Batch_size x y).
+        For cross entropy loss in PyTorch, the target tensor can simply have the shape (Batch_size), while the input is expected to have the shape (Batch_size, num_classes).
         """
         x1, x2, x3, y = batch
-        logits = self.forward(x)
+        logits = self.forward(x1, x2, x3)
         loss = self.criterion(logits, y)
         preds = torch.argmax(logits, dim=1)
         return loss, preds, y
 
     def training_step(
-        self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+        self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
         """Perform a single training step on a batch of data from the training set.
 
@@ -140,7 +143,7 @@ class MILitModule(LightningModule):
         "Lightning hook that is called when a training epoch ends."
         pass
 
-    def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
+    def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int) -> None:
         """Perform a single validation step on a batch of data from the validation set.
 
         :param batch: A batch of data (a tuple) containing the input tensor of images and target
@@ -163,7 +166,7 @@ class MILitModule(LightningModule):
         # otherwise metric would be reset by lightning after each epoch
         self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=True)
 
-    def test_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
+    def test_step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int) -> None:
         """Perform a single test step on a batch of data from the test set.
 
         :param batch: A batch of data (a tuple) containing the input tensor of images and target
