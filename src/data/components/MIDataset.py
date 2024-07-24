@@ -126,6 +126,8 @@ class CompositeMIDataset(Dataset):
         # translate the index of the sequences data to the index of single data
         index = self.index_translation(index, reverse=True)
         f1 = self.datasets[0][index]
+        # append speaker id to the feature
+        f1 = np.append(f1, self.labels[index][0])
         f2 = self.datasets[1][index]
         f3 = self.datasets[2][index]
         label = self.labels[index][1]
