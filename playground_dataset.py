@@ -35,6 +35,8 @@ class CSVDIRDataset(Dataset):
         with open(path, 'r') as f:
             reader = csv.reader(f)
             line = next(reader)
+            if line == '':
+                raise ValueError('Empty file', path)
             return np.array(line, dtype=np.float32)
 
 
@@ -167,10 +169,9 @@ if __name__ == "__main__":
 
     d2 = CompositeMIDataset()
     dl2 = DataLoader(d2, batch_size=4, shuffle=False, num_workers=0)
-    print(len(dl2))
-    for batch in dl2:
-        print(batch[0].shape, batch[0])
-        print(batch[1].shape, batch[1])
-        print(batch[2].shape, batch[2])
-        print(batch[3].shape, batch[3])
+    print(len(d2))
+    print(d2[len(d2)-1])
+    for idx, batch in enumerate(dl2):
+        if idx % 100 == 0:
+            print(idx)
         break

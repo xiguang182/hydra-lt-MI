@@ -35,6 +35,8 @@ class CSVDIRDataset(Dataset):
         with open(path, 'r') as f:
             reader = csv.reader(f)
             line = next(reader)
+            if line == '':
+                raise ValueError('Empty file', path)
             return np.array(line, dtype=np.float32)
 
 
