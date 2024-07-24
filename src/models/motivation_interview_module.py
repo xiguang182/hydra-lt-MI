@@ -76,13 +76,13 @@ class MILitModule(LightningModule):
         # for tracking best so far validation accuracy
         self.val_acc_best = MaxMetric()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x1: torch.Tensor, x2: torch.Tensor, x3: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`.
 
         :param x: A tensor of images.
         :return: A tensor of logits.
         """
-        return self.net(x)
+        return self.net(x1, x2, x3)
 
     def on_train_start(self) -> None:
         """Lightning hook that is called when training begins."""

@@ -65,7 +65,7 @@ class CompositeMIDataset(Dataset):
         for record_idx, file_name in enumerate(sorted(os.listdir(label_path))):
             if file_name.endswith('.csv'):
                 file_path = os.path.join(label_path, file_name)
-                with open(file_path, 'r') as f:
+                with open(file_path, 'r', encoding= 'utf-8') as f:
                     reader = csv.reader(f)
                     for id, line in enumerate(reader):
                         # Skip the first line (header)
@@ -120,19 +120,29 @@ class CompositeMIDataset(Dataset):
                 count+=1
             index = index - count * 5
         return index
-
+    
     def __getitem__(self, index):
         # Gather features from each dataset
         # translate the index of the sequences data to the index of single data
         index = self.index_translation(index, reverse=True)
-        f1 = self.datasets[0][index]
-        # append speaker id to the feature
-        f1 = np.append(f1, self.labels[index][0])
-        f2 = self.datasets[1][index]
-        f3 = self.datasets[2][index]
-        label = self.labels[index][1]
-        
-        return (f1, f2, f3, label)
+        f1s = []
+        f2s = []
+        f3s = []
+        for i in range(6):
+            f1 = self.datasets[0][index-i]
+            # append speaker id to the feature
+            speaker_id = np.array(self.labels[index-i][0], dtype=np.float32)
+            f1 = np.append(f1, speaker_id)
+            f2 = self.datasets[1][index-i]
+            f3 = self.datasets[2][index-i]
+            f1s.append(f1)
+            f2s.append(f2)
+            f3s.append(f3)
+        x1 = np.vstack(f1s)
+        x2 = np.vstack(f2s)
+        x3 = np.vstack(f3s)
+        label = 0 if self.labels[index-i][1] > 33 else 1
+        return (x1, x2, x3, label)
     
     def __len__(self):
         # all datasets are of equal length asserted in init
@@ -152,7 +162,7 @@ if __name__ == "__main__":
     # Iterate through the DataLoader
     print(len(dataloader))
     for batch in dataloader:
-        print(batch.shape, batch)
+        print(batch.shape, batch.dtype, batch)
         break
 
     d2 = CompositeMIDataset()

@@ -159,6 +159,7 @@ class BaseLineModel(nn.Module):
         # unpack inputs or write forward function accepting 3 inputs
         x_RoBERTa, x_client, x_counselor = x1, x2, x3
         # RoBERTa
+        # print(x_RoBERTa.shape)
         x_RoBERTa = self.bilstm_RoBERTa(x_RoBERTa)
         x_RoBERTa = x_RoBERTa.permute(1,0,2)
         x_RoBERTa = x_RoBERTa.flatten(start_dim=1)
@@ -170,7 +171,7 @@ class BaseLineModel(nn.Module):
         x_counselor = x_counselor.flatten(start_dim=1)
         # linear layers
         x_client = self.linear_client(x_client)
-        print(x_client.shape)
+        # print(x_client.shape)
         x_counselor = self.linear_counselor(x_counselor)
         # concantenate and linear layer
         x = torch.cat((x_RoBERTa, x_client, x_counselor), dim=1)
