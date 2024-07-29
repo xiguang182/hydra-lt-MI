@@ -182,7 +182,6 @@ class MILitModule(LightningModule):
         
         f1 = self.val_f1.compute()
         self.val_f1_best(f1[1])
-        self.val_f1_best = self.val_f1_best.compute()
         # log `val_acc_best` as a value through `.compute()` method, instead of as a metric object
         # otherwise metric would be reset by lightning after each epoch
         self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=True)
