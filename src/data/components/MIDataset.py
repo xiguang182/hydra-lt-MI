@@ -143,6 +143,7 @@ class CompositeMIDataset(Dataset):
         x1 = np.vstack(f1s)
         x2 = np.vstack(f2s)
         x3 = np.vstack(f3s)
+        # >33 is not 'change talk' annotated 0, <=33 is 'change talk' annotated as 1
         label = 0 if self.labels[index-i][1] > 33 else 1
         return (x1, x2, x3, label)
     

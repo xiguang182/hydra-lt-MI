@@ -32,7 +32,70 @@ class LinearLayer(nn.Module):
         :return: The output tensor.
         """
         return self.activation(self.linear(x))
+    
 
+# class TransformerEncoderLayer(nn.Module):
+#     """A transformer encoder layer.
+#     In the case of the base line: 
+#     There are 6 transformer encoder layers with 768 hidden units.
+#     """
+
+#     def __init__(
+#             self, 
+#             input_size: int = 769, 
+#             hidden_size: int = 300,
+#             num_layers: int = 1,
+#             dropout: float = 0.,
+#         ) -> None:
+#         """Initialize a `TransformerEncoderLayer` module.
+
+#         :param input_size: The number of input features.
+#         :param hidden_size: The number of hidden units.
+#         :param num_layers: The number of transformer layers.
+#         :param dropout: The dropout rate.
+#         """
+#         super().__init__()
+#         self.transformer = nn.TransformerEncoder(
+
+
+
+class TransformerLayer(nn.Module):
+    """A transformer layer.
+    In the case of the base line: 
+    There are 6 transformer layers with 768 hidden units.
+    """
+
+    def __init__(
+            self, 
+            input_size: int = 769, 
+            hidden_size: int = 300,
+            num_layers: int = 1,
+            dropout: float = 0.,
+        ) -> None:
+        """Initialize a `TransformerLayer` module.
+
+        :param input_size: The number of input features.
+        :param hidden_size: The number of hidden units.
+        :param num_layers: The number of transformer layers.
+        :param dropout: The dropout rate.
+        """
+        super().__init__()
+        self.transformer = nn.Transformer(
+            d_model=input_size,
+            nhead=8,
+            num_encoder_layers=num_layers,
+            num_decoder_layers=num_layers,
+            dim_feedforward=hidden_size,
+            dropout=dropout,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Perform a single forward pass through the network.
+
+        :param x: The input tensor.
+        :return: The output tensor.
+        """
+        return self.transformer(x, x)
 
 class BiLSTMLayer(nn.Module):
     """A BiLSTM layer.

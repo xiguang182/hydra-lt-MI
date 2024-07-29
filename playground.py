@@ -60,3 +60,6 @@ for data in dataloader:
     # will automatically be add a target tensor, but just zeros
     print(data[0].shape)
     break
+
+for i in range(6):
+    print(i)

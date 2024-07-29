@@ -4,6 +4,7 @@ import torch
 from lightning import LightningModule
 from torchmetrics import MaxMetric, MeanMetric
 from torchmetrics.classification.accuracy import Accuracy
+from torchmetrics.classification import MulticlassF1Score as F1
 
 
 class MILitModule(LightningModule):
@@ -68,6 +69,14 @@ class MILitModule(LightningModule):
         self.val_acc = Accuracy(task="multiclass", num_classes=2)
         self.test_acc = Accuracy(task="multiclass", num_classes=2)
 
+        self.train_f1 = F1(num_classes=2, multidim_average='global', average=None)
+        self.val_f1 = F1(num_classes=2, multidim_average='global', average=None)
+        self.test_f1 = F1(num_classes=2, multidim_average='global', average=None)
+
+        # metric objects for calculating and averaging precision and f1 score across batches
+        # self.precision = Precision(num_classes=2)
+        # self.f1score = F1(num_classes=2)
+
         # for averaging loss across batches
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
@@ -75,6 +84,7 @@ class MILitModule(LightningModule):
 
         # for tracking best so far validation accuracy
         self.val_acc_best = MaxMetric()
+        self.val_f1_best = MaxMetric()
 
     def forward(self, x1: torch.Tensor, x2: torch.Tensor, x3: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`.
@@ -91,6 +101,9 @@ class MILitModule(LightningModule):
         self.val_loss.reset()
         self.val_acc.reset()
         self.val_acc_best.reset()
+
+        self.val_f1.reset()
+        self.val_f1_best.reset()
 
 # best practice for multiple input dataloader?
 # might need to change the input batch to a tuple of arbitrary length and unpack it with considitions. For different input numbers like only one person, only language, etc.
@@ -133,9 +146,11 @@ class MILitModule(LightningModule):
         # update and log metrics
         self.train_loss(loss)
         self.train_acc(preds, targets)
+        self.train_f1(preds, targets)
         self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True)
-
+        # 1 is 'change talk' and 0 is 'sustain talk'
+        self.log("train/f1/change_talk", self.train_f1[1], on_step=False, on_epoch=True, prog_bar=True,  metric_attribute="train/f1/change_talk")
         # return loss or backpropagation will fail
         return loss
 
@@ -155,16 +170,24 @@ class MILitModule(LightningModule):
         # update and log metrics
         self.val_loss(loss)
         self.val_acc(preds, targets)
+        self.val_f1(preds, targets)
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/f1/change_talk", self.val_f1[1], on_step=False, on_epoch=True, prog_bar=True, metric_attribute="val/f1/change_talk")
 
     def on_validation_epoch_end(self) -> None:
         "Lightning hook that is called when a validation epoch ends."
         acc = self.val_acc.compute()  # get current val acc
         self.val_acc_best(acc)  # update best so far val acc
+        
+        f1 = self.val_f1.compute()
+        self.val_f1_best(f1[1])
+        self.val_f1_best = self.val_f1_best.compute()
         # log `val_acc_best` as a value through `.compute()` method, instead of as a metric object
         # otherwise metric would be reset by lightning after each epoch
         self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=True)
+
+        self.log("val/f1/change_talk_best", self.val_f1_best, sync_dist=True, prog_bar=True)
 
     def test_step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int) -> None:
         """Perform a single test step on a batch of data from the test set.
@@ -180,6 +203,9 @@ class MILitModule(LightningModule):
         self.test_acc(preds, targets)
         self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
+
+        self.test_f1(preds, targets)
+        self.log("test/f1/change_talk", self.test_f1[1], on_step=False, on_epoch=True, prog_bar=True, metric_attribute="test/f1/change_talk")
 
     def on_test_epoch_end(self) -> None:
         """Lightning hook that is called when a test epoch ends."""
