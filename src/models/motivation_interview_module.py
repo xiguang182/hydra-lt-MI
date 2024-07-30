@@ -147,10 +147,11 @@ class MILitModule(LightningModule):
         self.train_loss(loss)
         self.train_acc(preds, targets)
         self.train_f1(preds, targets)
+        # print(self.train_f1.compute(),self.train_acc)
         self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True)
         # 1 is 'change talk' and 0 is 'sustain talk'
-        self.log("train/f1/change_talk", self.train_f1[1], on_step=False, on_epoch=True, prog_bar=True,  metric_attribute="train/f1/change_talk")
+        self.log("train/f1_change_talk", self.train_f1.compute()[1], on_step=False, on_epoch=True, prog_bar=True)
         # return loss or backpropagation will fail
         return loss
 
@@ -173,7 +174,7 @@ class MILitModule(LightningModule):
         self.val_f1(preds, targets)
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val/f1/change_talk", self.val_f1[1], on_step=False, on_epoch=True, prog_bar=True, metric_attribute="val/f1/change_talk")
+        self.log("val/f1_change_talk", self.val_f1.compute()[1], on_step=False, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self) -> None:
         "Lightning hook that is called when a validation epoch ends."
@@ -186,7 +187,7 @@ class MILitModule(LightningModule):
         # otherwise metric would be reset by lightning after each epoch
         self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=True)
 
-        self.log("val/f1/change_talk_best", self.val_f1_best, sync_dist=True, prog_bar=True)
+        self.log("val/f1_change_talk_best", self.val_f1_best.compute(), sync_dist=True, prog_bar=True)
 
     def test_step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int) -> None:
         """Perform a single test step on a batch of data from the test set.
@@ -204,7 +205,7 @@ class MILitModule(LightningModule):
         self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
 
         self.test_f1(preds, targets)
-        self.log("test/f1/change_talk", self.test_f1[1], on_step=False, on_epoch=True, prog_bar=True, metric_attribute="test/f1/change_talk")
+        self.log("test/f1_change_talk", self.test_f1, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_test_epoch_end(self) -> None:
         """Lightning hook that is called when a test epoch ends."""
