@@ -62,7 +62,9 @@ class MILitModule(LightningModule):
         self.net = net
 
         # loss function
-        self.criterion = torch.nn.CrossEntropyLoss()
+        # add class_weights to the loss function
+        class_weights = torch.tensor([.5, 5.0])
+        self.criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
 
         # metric objects for calculating and averaging accuracy across batches
         self.train_acc = Accuracy(task="multiclass", num_classes=2)
@@ -172,8 +174,8 @@ class MILitModule(LightningModule):
         """
         loss, preds, targets = self.model_step(batch)
         
-        print('preds',preds)
-        print('label',targets)
+        # print('preds',preds)
+        # print('label',targets)
 
         # update and log metrics
         self.val_loss(loss)

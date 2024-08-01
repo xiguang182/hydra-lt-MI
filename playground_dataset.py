@@ -43,8 +43,9 @@ class CSVDIRDataset(Dataset):
 
 # hard coded dataset dir names
 class CompositeMIDataset(Dataset):
-    def __init__(self, root = './data', transform=None):
+    def __init__(self, root = './data', exclude_counsellor = True, transform=None):
         self.root = root
+        self.exclude_counsellor = exclude_counsellor
         feature_dir = ['lang_data', 'OpenFace_Client_norm_dir', 'OpenFace_Counselor_norm_dir']
         self.labels_dir = 'Stable_mod_source_data_confirmed_20240213'
         self.datasets = [
@@ -56,6 +57,10 @@ class CompositeMIDataset(Dataset):
         assert len(self.datasets[0]) == len(self.datasets[1]) == len(self.datasets[2]) == len(self.labels), 'all child datasets and labels are from the same experiment data, and should be the same size'
         # the sequence length of the LSTM - 1, i.e. 6 length includes 1 of the target and 5 previous window
         self.window = 5
+
+        # the indices of the client data only
+        if exclude_counsellor:
+            self.indices = self.make_indices()
 
 
     def make_labels(self):
@@ -87,6 +92,7 @@ class CompositeMIDataset(Dataset):
                             # the second column (cat) category, the actual label
                             if idx == 1:
                                 processed_line.append(int(item))
+                                # print(processed_line)
                             # the third column (utt) utterance, skip
                             if idx == 2:
                                 pass
@@ -113,43 +119,83 @@ class CompositeMIDataset(Dataset):
         if reverse:
             for divider in self.dividers:
                 if index >= divider:
-                    index += 5
+                    index += self.window
         # translate single data index to the index of sequences data
         else:
             count = 0
             for divider in self.dividers:
-                assert index >= (divider + 5), 'the first 5 data after every divider(file) should be skipped'
+                if not self.check_index_validity(index):
+                    raise ValueError('Index out of range or at the divider, no data')
+                # assert index >= (divider + 5), 'the first 5 data after every divider(file) should be skipped'
                 count+=1
-            index = index - count * 5
+            index = index - count * self.window
         return index
+    
+    def check_index_validity(self, index):
+        # check if the index is valid
+        if index < 0 or index >= self.dividers[-1]:
+            return False
+            # raise ValueError('Index out of range')
+        for divider in self.dividers:
+            if index < (divider + self.window) and index >= divider:
+                # raise ValueError('Index at the divider, no data')
+                return False
+        return True
+        
+    def count_positive(self):
+        cnt = 0
+        for label in self.labels:
+            if label[0] == 0:
+                if label[1] <= 33:
+                    cnt += 1
+        return cnt
+    
+    def make_indices(self):
+        indices = []
+        for i in range(self.dividers[-1]):
+            # only append the indices of client annotated as 0
+            if self.check_index_validity(i):
+                if self.labels[i][0] == 0:
+                    indices.append(i)
+        return indices
+
     
     def __getitem__(self, index):
         # Gather features from each dataset
         # translate the index of the sequences data to the index of single data
-        index = self.index_translation(index, reverse=True)
+        if self.exclude_counsellor:
+            index = self.indices[index]
+        else:
+            index = self.index_translation(index, reverse=True)
+        
         f1s = []
         f2s = []
         f3s = []
         for i in range(6):
-            f1 = self.datasets[0][index-i]
+            f1 = self.datasets[0][index-5+i]
             # append speaker id to the feature
             speaker_id = np.array(self.labels[index-i][0], dtype=np.float32)
             f1 = np.append(f1, speaker_id)
-            f2 = self.datasets[1][index-i]
-            f3 = self.datasets[2][index-i]
+            f2 = self.datasets[1][index-5+i]
+            f3 = self.datasets[2][index-5+i]
             f1s.append(f1)
             f2s.append(f2)
             f3s.append(f3)
         x1 = np.vstack(f1s)
         x2 = np.vstack(f2s)
         x3 = np.vstack(f3s)
-        label = 0 if self.labels[index-i][1] > 33 else 1
+        # >33 is not 'change talk' annotated 0, <=33 is 'change talk' annotated as 1
+        label = 0 if self.labels[index][1] > 33 else 1
+        # print(label)
         return (x1, x2, x3, label)
     
     def __len__(self):
         # all datasets are of equal length asserted in init
         # the total number of sequences data
-        return len(self.datasets[0]) - self.window * len(self.dividers)
+        if self.exclude_counsellor:
+            return len(self.indices)
+        else:
+            return len(self.datasets[0]) - self.window * len(self.dividers)
 
 
 
@@ -168,10 +214,22 @@ if __name__ == "__main__":
         break
 
     d2 = CompositeMIDataset()
-    dl2 = DataLoader(d2, batch_size=4, shuffle=False, num_workers=0)
-    print(len(d2))
-    print(d2[len(d2)-1])
-    for idx, batch in enumerate(dl2):
-        if idx % 100 == 0:
-            print(idx)
-        break
+    dl2 = DataLoader(d2, batch_size=1, shuffle=False, num_workers=0)
+    print(len(dl2))
+    cnt = 0
+    cnt2 = 0
+    print(d2.count_positive())
+    for batch in dl2:
+        print(batch[3])
+        if batch[3] == 1:
+            cnt += 1
+        else:
+            cnt2 += 1
+        # print(batch[0].shape, batch[0])
+        # print(batch[1].shape, batch[1])
+        # print(batch[2].shape, batch[2])
+        # print(batch[3].shape, batch[3])
+        # break
+
+    print(cnt)
+    # 12970 out of 23397 are 'change talk' annotated as 1
