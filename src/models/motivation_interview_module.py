@@ -84,8 +84,8 @@ class MILitModule(LightningModule):
 
         # for tracking best so far validation accuracy
         self.val_acc_best = MaxMetric()
-        self.val_f1_best = MaxMetric()
-
+        self.val_f1_sustain_best = MaxMetric()
+        self.val_f1_change_best = MaxMetric()
     def forward(self, x1: torch.Tensor, x2: torch.Tensor, x3: torch.Tensor) -> torch.Tensor:
         """Perform a forward pass through the model `self.net`.
 
@@ -103,7 +103,8 @@ class MILitModule(LightningModule):
         self.val_acc_best.reset()
 
         self.val_f1.reset()
-        self.val_f1_best.reset()
+        self.val_f1_sustain_best.reset()
+        self.val_f1_change_best.reset()
 
 # best practice for multiple input dataloader?
 # might need to change the input batch to a tuple of arbitrary length and unpack it with considitions. For different input numbers like only one person, only language, etc.
@@ -128,6 +129,7 @@ class MILitModule(LightningModule):
         x1, x2, x3, y = batch
         logits = self.forward(x1, x2, x3)
         loss = self.criterion(logits, y)
+        # print(logits)
         preds = torch.argmax(logits, dim=1)
         return loss, preds, y
 
@@ -147,11 +149,13 @@ class MILitModule(LightningModule):
         self.train_loss(loss)
         self.train_acc(preds, targets)
         self.train_f1(preds, targets)
-        # print(self.train_f1.compute(),self.train_acc)
+        # print(self.train_f1.compute(),self.train_f1[0])
+        # tensor([0.0833, 0.6944], device='cuda:0') CompositionalMetric<lambda>(MulticlassF1Score(),None))
         self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True)
         # 1 is 'change talk' and 0 is 'sustain talk'
         self.log("train/f1_change_talk", self.train_f1.compute()[1], on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train/f1_sustain_talk", self.train_f1.compute()[0], on_step=False, on_epoch=True, prog_bar=True)
         # return loss or backpropagation will fail
         return loss
 
@@ -167,6 +171,9 @@ class MILitModule(LightningModule):
         :param batch_idx: The index of the current batch.
         """
         loss, preds, targets = self.model_step(batch)
+        
+        print('preds',preds)
+        print('label',targets)
 
         # update and log metrics
         self.val_loss(loss)
@@ -175,6 +182,7 @@ class MILitModule(LightningModule):
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/f1_change_talk", self.val_f1.compute()[1], on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/f1_sustain_talk", self.val_f1.compute()[0], on_step=False, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self) -> None:
         "Lightning hook that is called when a validation epoch ends."
@@ -182,12 +190,14 @@ class MILitModule(LightningModule):
         self.val_acc_best(acc)  # update best so far val acc
         
         f1 = self.val_f1.compute()
-        self.val_f1_best(f1[1])
+        self.val_f1_change_best(f1[1])
+        self.val_f1_sustain_best(f1[0])
         # log `val_acc_best` as a value through `.compute()` method, instead of as a metric object
         # otherwise metric would be reset by lightning after each epoch
         self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=True)
 
-        self.log("val/f1_change_talk_best", self.val_f1_best.compute(), sync_dist=True, prog_bar=True)
+        self.log("val/f1_change_talk_best", self.val_f1_change_best.compute(), sync_dist=True, prog_bar=True)
+        self.log("val/f1_sustain_talk_best", self.val_f1_sustain_best.compute(), sync_dist=True, prog_bar=True)
 
     def test_step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int) -> None:
         """Perform a single test step on a batch of data from the test set.
@@ -197,7 +207,7 @@ class MILitModule(LightningModule):
         :param batch_idx: The index of the current batch.
         """
         loss, preds, targets = self.model_step(batch)
-
+        
         # update and log metrics
         self.test_loss(loss)
         self.test_acc(preds, targets)
@@ -205,7 +215,8 @@ class MILitModule(LightningModule):
         self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
 
         self.test_f1(preds, targets)
-        self.log("test/f1_change_talk", self.test_f1, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test/f1_change_talk", self.test_f1.compute()[1], on_step=False, on_epoch=True, prog_bar=True)
+        self.log("test/f1_sustain_talk", self.test_f1.compute()[0], on_step=False, on_epoch=True, prog_bar=True)
 
     def on_test_epoch_end(self) -> None:
         """Lightning hook that is called when a test epoch ends."""

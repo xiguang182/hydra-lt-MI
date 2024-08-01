@@ -1,5 +1,5 @@
 <div align="center">
-
+<!-- python train.py +trainer.gradient_clip_val=0.5 -->
 # Lightning-Hydra-Template
 
 [![python](https://img.shields.io/badge/-Python_3.8_%7C_3.9_%7C_3.10-blue?logo=python&logoColor=white)](https://github.com/pre-commit/pre-commit)

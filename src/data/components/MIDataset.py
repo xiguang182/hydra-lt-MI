@@ -87,6 +87,7 @@ class CompositeMIDataset(Dataset):
                             # the second column (cat) category, the actual label
                             if idx == 1:
                                 processed_line.append(int(item))
+                                # print(processed_line)
                             # the third column (utt) utterance, skip
                             if idx == 2:
                                 pass
@@ -131,12 +132,12 @@ class CompositeMIDataset(Dataset):
         f2s = []
         f3s = []
         for i in range(6):
-            f1 = self.datasets[0][index-i]
+            f1 = self.datasets[0][index-5+i]
             # append speaker id to the feature
             speaker_id = np.array(self.labels[index-i][0], dtype=np.float32)
             f1 = np.append(f1, speaker_id)
-            f2 = self.datasets[1][index-i]
-            f3 = self.datasets[2][index-i]
+            f2 = self.datasets[1][index-5+i]
+            f3 = self.datasets[2][index-5+i]
             f1s.append(f1)
             f2s.append(f2)
             f3s.append(f3)
@@ -144,7 +145,8 @@ class CompositeMIDataset(Dataset):
         x2 = np.vstack(f2s)
         x3 = np.vstack(f3s)
         # >33 is not 'change talk' annotated 0, <=33 is 'change talk' annotated as 1
-        label = 0 if self.labels[index-i][1] > 33 else 1
+        label = 0 if self.labels[index][1] > 33 else 1
+        # print(label)
         return (x1, x2, x3, label)
     
     def __len__(self):
