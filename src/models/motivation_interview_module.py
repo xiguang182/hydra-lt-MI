@@ -63,7 +63,7 @@ class MILitModule(LightningModule):
 
         # loss function
         # add class_weights to the loss function
-        class_weights = torch.tensor([1.0, 4.0])
+        class_weights = torch.tensor([1.0, 10.0])
         self.criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
 
         # metric objects for calculating and averaging accuracy across batches

@@ -1,7 +1,7 @@
 _target_: src.models.motivation_interview_module.MILitModule
 
 optimizer:
-  _target_: torch.optim.Adam
+  _target_: torch.optim.Adadelta
   _partial_: true
   lr: 0.001
   weight_decay: 0.0

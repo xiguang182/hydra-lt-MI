@@ -5,3 +5,5 @@
 python src/train.py trainer.max_epochs=5 logger=csv
 
 python src/train.py trainer.max_epochs=10 logger=csv
+
+python src/train.py trainer=gpu logger=wandb +trainer.gradient_clip_val=0.5

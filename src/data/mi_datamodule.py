@@ -131,14 +131,14 @@ class MIDataModule(LightningDataModule):
             train_length = int(total_length * ratios[0])
             val_length = int(total_length * ratios[1])
             test_length = total_length - train_length - val_length
-            self.data_train = Subset(dataset, indices=range(0, train_length))
-            self.data_val = Subset(dataset, indices=range(train_length, train_length + val_length))
-            self.data_test = Subset(dataset, indices=range(train_length + val_length, total_length))
-            # self.data_train, self.data_val, self.data_test = random_split(
-            #     dataset=dataset,
-            #     lengths=[train_length, val_length, test_length],
-            #     generator=torch.Generator().manual_seed(42),
-            # )
+            # self.data_train = Subset(dataset, indices=range(0, train_length))
+            # self.data_val = Subset(dataset, indices=range(train_length, train_length + val_length))
+            # self.data_test = Subset(dataset, indices=range(train_length + val_length, total_length))
+            self.data_train, self.data_val, self.data_test = random_split(
+                dataset=dataset,
+                lengths=[train_length, val_length, test_length],
+                generator=torch.Generator().manual_seed(42),
+            )
 
     def train_dataloader(self) -> DataLoader[Any]:
         """Create and return the train dataloader.
@@ -150,7 +150,7 @@ class MIDataModule(LightningDataModule):
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
-            shuffle=False,
+            shuffle=True,
         )
 
     def val_dataloader(self) -> DataLoader[Any]:
@@ -163,7 +163,7 @@ class MIDataModule(LightningDataModule):
             batch_size=self.batch_size_per_device,
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
-            shuffle=False,
+            shuffle=True,
         )
 
     def test_dataloader(self) -> DataLoader[Any]:
