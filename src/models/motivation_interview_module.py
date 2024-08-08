@@ -46,6 +46,7 @@ class MILitModule(LightningModule):
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
         compile: bool,
+        class_weights: float = 7.0,
     ) -> None:
         """Initialize a `MNISTLitModule`.
 
@@ -63,8 +64,9 @@ class MILitModule(LightningModule):
 
         # loss function
         # add class_weights to the loss function
-        class_weights = torch.tensor([1.0, 10.0])
-        self.criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+
+        self.class_weights = torch.tensor([1.0, class_weights])
+        self.criterion = torch.nn.CrossEntropyLoss(weight=self.class_weights)
 
         # metric objects for calculating and averaging accuracy across batches
         self.train_acc = Accuracy(task="multiclass", num_classes=2)
