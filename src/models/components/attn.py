@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as f
 import torch.utils.checkpoint
 
-class Attention(nn.Module):
+class CrossAttention(nn.Module):
     def __init__(self, dim, num_heads = 8, qkv_bias = False, attn_drop = 0., proj_drop = 0):
         super().__init__()
         # dim has been modified to the dim of each head (embedding)
@@ -11,6 +11,62 @@ class Attention(nn.Module):
         self.num_heads = num_heads
         self.out_channel = dim * num_heads
         self.scale = dim **-0.5
+
+        self.q = nn.Linear(self.out_channel, self.out_channel, bias = qkv_bias)
+        self.kv = nn.Linear(self.out_channel, self.out_channel * 2, bias = qkv_bias)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(self.out_channel, self.out_channel)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, x, y):
+        # batch, number of patches, Channel (actual patch embeding * heads * 3)
+        # x provides the query, y provides the key and value
+        B, N, C = x.shape
+        assert C == self.out_channel, 'total dim of out_channel dismatch'
+        # reshape into B N 3(QKV) heads(parallel attentions, H) each patch(P) 
+        # note: H * P = C
+        # after permute: 3 B H N P
+        
+        # B N H P then permute B H N P
+        q = self.q(x).reshape(B, N, self.num_heads, C // self.num_heads).permute(0,2,1,3)
+        # B N 2 H P then permute 2 B H N P
+        kv = self.kv(y).reshape(B, N, 2, self.num_heads, C // self.num_heads).permute(2,0,3,1,4)
+
+        # B H N P
+        k, v = kv.unbind(0)
+
+        # B H N N 
+        attn = (q @ k.transpose(-2,-1)) * self.scale
+
+        if self.causal:        
+            # Create a mask with shape [N, N]
+            # Masking future positions (upper triangle of the matrix)
+            causal_mask = torch.triu(torch.ones((N, N)), diagonal=0)
+
+            # Convert mask to boolean (True where mask is 1, False where it's 0)
+            causal_mask = causal_mask.bool()
+            # Apply the causal mask: setting masked positions to -inf
+            attn.masked_fill_(causal_mask, float('-inf'))
+
+        attn = attn.softmax(dim = -1)
+        attn = self.attn_drop(attn)
+
+        # B H N P then transpose B N H P then reshape: B N C
+        x = (attn @ v).transpose(1,2).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
+
+class Attention(nn.Module):
+    def __init__(self, dim, num_heads = 8, qkv_bias = False, attn_drop = 0., proj_drop = 0, causal = False):
+        super().__init__()
+        # dim has been modified to the dim of each head (embedding)
+        # assert dim % num_heads == 0, 'dim should be divisible by num_heads'
+        self.num_heads = num_heads
+        self.out_channel = dim * num_heads
+        self.scale = dim **-0.5
+        self.causal = causal
 
         self.qkv = nn.Linear(self.out_channel, self.out_channel * 3, bias = qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
@@ -30,6 +86,17 @@ class Attention(nn.Module):
 
         # B H N N 
         attn = (q @ k.transpose(-2,-1)) * self.scale
+        
+        if self.causal:        
+            # Create a mask with shape [N, N]
+            # Masking future positions (upper triangle of the matrix)
+            causal_mask = torch.triu(torch.ones((N, N)), diagonal=1)
+
+            # Convert mask to boolean (True where mask is 1, False where it's 0)
+            causal_mask = causal_mask.bool()
+            # Apply the causal mask: setting masked positions to -inf
+            attn.masked_fill_(causal_mask, float('-inf'))
+
         attn = attn.softmax(dim = -1)
         attn = self.attn_drop(attn)
 
@@ -97,3 +164,13 @@ class block(nn.Module):
         x = x + self.drop_path2(self.ls2(self.mlp(self.norm2(x))))
         return x
 
+if __name__ == "__main__":
+    # _ = SimpleDenseNet()
+    # a = torch.rand((5,769))
+    # model = BiLSTMLayer() 
+    # output, (hd, _) = model(a)
+    # print(output.shape)
+    # print(hd.shape)
+    model = block()
+    output = model(a,b,c)
+    print(output.shape)
