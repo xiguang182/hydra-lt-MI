@@ -97,8 +97,15 @@ class MILitModule(LightningModule):
         :return: A tensor of logits.
         """
         return self.net(x1, x2, x3)
+    
+    def on_fit_start(self):
+        # self.net.to(self.device)
+        print(f"Net is on device: {next(self.net.parameters()).device}")
+        print(self.net)
 
     def on_train_start(self) -> None:
+        print("on_train_start called")
+        self.net.to(self.device)
         """Lightning hook that is called when training begins."""
         # by default lightning executes validation step sanity checks before training starts,
         # so it's worth to make sure validation metrics don't store results from these checks

@@ -2,6 +2,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as f
 import torch.utils.checkpoint
+# from src.models.components.model_helper import 
+import numpy as np
+def positional_embedding(n, dim):
+    pe = torch.zeros(n, dim)
+    position = torch.arange(0, n).unsqueeze(1).float()
+    div_term = torch.exp(torch.arange(0, dim, 2).float() * -(np.log(10000.0) / dim))
+    pe[:, 0::2] = torch.sin(position * div_term)
+    pe[:, 1::2] = torch.cos(position * div_term)
+    return pe
 
 class CrossAttention(nn.Module):
     """ Cross Attention layer.
@@ -169,7 +178,7 @@ class Attention(nn.Module):
             # Create a mask with shape [N, N]
             # Masking future positions (upper triangle of the matrix)
             # to device?
-            causal_mask = torch.triu(torch.ones((N, N)), diagonal=1)
+            causal_mask = torch.triu(torch.ones((N, N)), diagonal=1).to(x.device)
 
             # Convert mask to boolean (True where mask is 1, False where it's 0)
             causal_mask = causal_mask.bool()
@@ -237,76 +246,110 @@ class Block(nn.Module):
         self.drop_path2 = nn.Identity()
 
     def forward(self, x):
+        # layerNorm device issue.
+        # print(f"Input device: {x.device}")
+        # print(f"LayerNorm weight device: {self.norm1.weight.device}")
+        # print(f"LayerNorm bias device: {self.norm1.bias.device}")
+        # self.norm1 = self.norm1.to(x.device)
+        
         x = x + self.drop_path1(self.ls1(self.attn(self.norm1(x))))
         # is a mlp layer here necessary?
         x = x + self.drop_path2(self.ls2(self.mlp(self.norm2(x))))
         return x
 
-class alt_SSTransformer(nn.Module):
-    def __init__(
-        self, window_frame, patch_frame, num_heads = 8, embed_dim=16, depth = 6, drop_out = 0, qkv_bias = True, init_values = 1e-5, modality_stacks = 1):
-        super().__init__()
+# class alt_SSTransformer(nn.Module):
+#     def __init__(
+#         self, window_frame, patch_frame, num_heads = 8, embed_dim=16, depth = 6, drop_out = 0, qkv_bias = True, init_values = 1e-5, modality_stacks = 1):
+#         super().__init__()
 
-        self.attn_out = 7
-        norm_layer = nn.LayerNorm
-        act_layer = nn.GELU
-        self.act = nn.GELU()
-        embed_dim = embed_dim // 16
-        # heads * embed_dim = total dim for multi-head attation i.e. C in embed output (B, L, C)
-        self.out_channel = embed_dim * num_heads
-        self.patch_embed = nn.Linear(self.out_channel * 2, self.out_channel)
-        self.embed_mlp =  Mlp(in_features=self.out_channel * 2, hidden_features=int(self.out_channel * 2 * 2), out_features = self.out_channel)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.out_channel))
-        # actual number of embeddings + class 1 token, in this case it will be used for regression output.
-        num_embed = modality_stacks * window_frame // patch_frame + 1
-        self.pos_embed = nn.Parameter(torch.randn(1, num_embed, self.out_channel) * .02)
-        self.pos_drop = nn.Dropout(p = drop_out)
-        # self.drop_out = drop_out
-        self.drop_out = drop_out
-        dpr = [x.item() for x in torch.linspace(0, drop_out, depth)]  # stochastic depth decay rule
+#         self.attn_out = 7
+#         norm_layer = nn.LayerNorm
+#         act_layer = nn.GELU
+#         self.act = nn.GELU()
+#         embed_dim = embed_dim // 16
+#         # heads * embed_dim = total dim for multi-head attation i.e. C in embed output (B, L, C)
+#         self.out_channel = embed_dim * num_heads
+#         self.patch_embed = nn.Linear(self.out_channel * 2, self.out_channel)
+#         self.embed_mlp =  Mlp(in_features=self.out_channel * 2, hidden_features=int(self.out_channel * 2 * 2), out_features = self.out_channel)
+#         self.cls_token = nn.Parameter(torch.zeros(1, 1, self.out_channel))
+#         # actual number of embeddings + class 1 token, in this case it will be used for regression output.
+#         num_embed = modality_stacks * window_frame // patch_frame + 1
+#         self.pos_embed = nn.Parameter(torch.randn(1, num_embed, self.out_channel) * .02)
+#         self.pos_drop = nn.Dropout(p = drop_out)
+#         # self.drop_out = drop_out
+#         self.drop_out = drop_out
+#         dpr = [x.item() for x in torch.linspace(0, drop_out, depth)]  # stochastic depth decay rule
 
-        self.blocks =  nn.Sequential(*[
-            block(
-                dim=embed_dim, num_heads = num_heads, mlp_ratio=4, qkv_bias=qkv_bias, init_values=init_values,
-                drop= self.drop_out, attn_drop= drop_out, drop_path=dpr[i], norm_layer=norm_layer, act_layer = act_layer)
-            for i in range(depth)])
+#         self.blocks =  nn.Sequential(*[
+#             Block(
+#                 dim=embed_dim, num_heads = num_heads, mlp_ratio=4, qkv_bias=qkv_bias, init_values=init_values,
+#                 drop= self.drop_out, attn_drop= drop_out, drop_path=dpr[i], norm_layer=norm_layer, act_layer = act_layer)
+#             for i in range(depth)])
 
-        self.norm = norm_layer(self.out_channel)
-        # no norm for class token
+#         self.norm = norm_layer(self.out_channel)
+#         # no norm for class token
 
-        # attn Head, output from each attn stream
-        self.head = nn.Linear(self.out_channel, self.attn_out)
+#         # attn Head, output from each attn stream
+#         self.head = nn.Linear(self.out_channel, self.attn_out)
 
-    def init_weight(self):
-        return None
+#     def init_weight(self):
+#         return None
 
-    # pos embeding AND prepend class token
-    def _pos_embed(self, x):
-        # -1 means not changing size
-        # x is from embed (B, L, C)
-        # cls token is (1, 1, C)
+#     # pos embeding AND prepend class token
+#     def _pos_embed(self, x):
+#         # -1 means not changing size
+#         # x is from embed (B, L, C)
+#         # cls token is (1, 1, C)
         
-        x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim = 1)
-        x = x + self.pos_embed
-        return self.pos_drop(x)
+#         x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim = 1)
+#         x = x + self.pos_embed
+#         return self.pos_drop(x)
 
-    def forward_feature(self, x):
-        # x = self.act(self.patch_embed(x))
-        x = self.embed_mlp(x)
-        x = self._pos_embed(x)
-        x = self.blocks(x)
-        x = self.norm(x)
-        return x
+#     def forward_feature(self, x):
+#         # x = self.act(self.patch_embed(x))
+#         x = self.embed_mlp(x)
+#         x = self._pos_embed(x)
+#         x = self.blocks(x)
+#         x = self.norm(x)
+#         return x
 
-    def forward_head(self, x):
-        x = x[:,0]
-        x = self.head(x)
-        return x
+#     def forward_head(self, x):
+#         x = x[:,0]
+#         x = self.head(x)
+#         return x
 
-    def forward(self, x):
-        x = self.forward_feature(x)
-        x = self.forward_head(x)
-        return x
+#     def forward(self, x):
+#         x = self.forward_feature(x)
+#         x = self.forward_head(x)
+#         return x
+
+class ClassiferLayer(nn.Module):
+    """A classifier layer.
+    In the case of the base line: 
+    There is a classifier layer with 300 input features and 2 output classes.
+    """
+
+    def __init__(
+            self, 
+            in_features: int = 300, 
+            out_features: int = 2,
+        ) -> None:
+        """Initialize a `ClassiferLayer` module.
+
+        :param in_features: The number of input features.
+        :param out_features: The number of output features.
+        """
+        super().__init__()
+        self.linear = nn.Linear(in_features, out_features)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Perform a single forward pass through the network.
+
+        :param x: The input tensor.
+        :return: The output tensor.
+        """
+        return self.softmax(self.linear(x))
     
 class sT_cCl_cCo_Model(nn.Module):
     """ 
@@ -314,7 +357,7 @@ class sT_cCl_cCo_Model(nn.Module):
     cross attention from client to text, 
     cross attention from counseller to text
     """
-    def __init__(self, dim, depth = 1, num_heads = 8, mlp_ratio = 4, 
+    def __init__(self, dim = 512, depth = 3, num_heads = 8, mlp_ratio = 4, 
                  qkv_bias = False, drop = 0, attn_drop = 0, init_values = 1e-5, 
                  drop_path = False, act_layer = nn.ReLU, norm_layer = nn.LayerNorm, causal = False):
         super().__init__()
@@ -322,21 +365,17 @@ class sT_cCl_cCo_Model(nn.Module):
         self.depth = depth
         self.num_heads = num_heads
 
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.dim))
 
-        self.sT = Block(
-            dim = dim, 
-            num_heads = num_heads, 
-            mlp_ratio = mlp_ratio, 
-            qkv_bias = qkv_bias, 
-            drop = drop, 
-            attn_drop = attn_drop, 
-            init_values = init_values, 
-            drop_path = drop_path, 
-            act_layer = act_layer, 
-            norm_layer = norm_layer, 
-            causal = causal
-        )
-        self.blocks = nn.ModuleList([
+        text_dim = 769
+        client_dim = 674
+        counseller_dim = 674
+        self.linear_text = nn.Linear(text_dim, dim)
+        self.linear_client = nn.Linear(client_dim, dim)
+        self.linear_counseller = nn.Linear(counseller_dim, dim)
+
+
+        self.self_blocks = nn.ModuleList([
             Block(
                 dim = dim, 
                 num_heads = num_heads, 
@@ -351,15 +390,67 @@ class sT_cCl_cCo_Model(nn.Module):
                 causal = causal
             ) for i in range(depth)
         ])
+
+        self.cl_blocks = nn.ModuleList([Cross_block(   # cross attention from client to text    
+            dim = dim, 
+            num_heads = num_heads, 
+            mlp_ratio = mlp_ratio, 
+            qkv_bias = qkv_bias, 
+            drop = drop, 
+            attn_drop = attn_drop, 
+            init_values = init_values, 
+            drop_path = drop_path, 
+            act_layer = act_layer, 
+            norm_layer = norm_layer, 
+            causal = causal
+        ) for i in range(depth)])
+
+        self.co_blocks = nn.ModuleList([Cross_block(   # cross attention from counseller to text    
+            dim = dim, 
+            num_heads = num_heads, 
+            mlp_ratio = mlp_ratio, 
+            qkv_bias = qkv_bias, 
+            drop = drop, 
+            attn_drop = attn_drop, 
+            init_values = init_values, 
+            drop_path = drop_path, 
+            act_layer = act_layer, 
+            norm_layer = norm_layer, 
+            causal = causal
+        ) for i in range(depth)])
+
+        self.classifier = ClassiferLayer(dim, 2)
+
+
+
     def forward(self, x, y, z):
-        for block in self.blocks:
+        # positional embedding, may cause device error
+        _, N, _ = x.shape
+        x = self.linear_text(x)
+        x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim = 1)
+        x = x + positional_embedding(N + 1, self.dim).to(x.device)
+        _, M, _ = y.shape
+        y = self.linear_client(y) + positional_embedding(M, self.dim).to(y.device)
+        _, O, _ = z.shape
+        z = self.linear_counseller(z) + positional_embedding(O, self.dim).to(z.device)
+
+        for block in self.self_blocks:
             x = block(x)
-        return x
+        for block in self.cl_blocks:
+            x = block(x, y)
+        for block in self.co_blocks:
+            x = block(x, z)
+        # x = self.sT(x)
+        return self.classifier(x[:,0])
+    
+
 
 
 if __name__ == "__main__":
-    a = torch.rand((5,5,128))
-    b = torch.rand((5,6,128))
-    model = Cross_block(dim=128, causal=True)
-    output = model(a, b)
+    a = torch.rand((5,5,769))
+    b = torch.rand((5,6,674))
+    # model = Cross_block(dim=128, causal=True)
+    # output = model(a, b)
+    model = sT_cCl_cCo_Model(dim=128)
+    output = model(a, b, b)
     print(output.shape)
