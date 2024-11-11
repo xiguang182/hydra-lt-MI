@@ -1,1 +1,6 @@
-python src/train.py trainer=gpu model=sTcClcCo
+python src/train.py  -m hparams_search=baseline_optuna trainer=gpu model=sTcClcCo logger=wandb
+hyperparameter search 
+python train.py -m hparams_search=baseline_optuna trainer=gpu
+
+# gradient clipping may be enabled to avoid exploding gradients
+python train.py +trainer.gradient_clip_val=0.5

@@ -444,7 +444,121 @@ class sT_cCl_cCo_Model(nn.Module):
         return self.classifier(x[:,0])
     
 
+class sT(nn.Module):
+    """
+    self attention on text
+    """
+    def __init__(self, dim = 512, depth = 3, num_heads = 8, mlp_ratio = 4, 
+                 qkv_bias = False, drop = 0, attn_drop = 0, init_values = 1e-5, 
+                 drop_path = False, act_layer = nn.ReLU, norm_layer = nn.LayerNorm, causal = False):
+        super().__init__()
+        self.dim = dim
+        self.depth = depth
+        self.num_heads = num_heads
 
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.dim))
+
+        text_dim = 769
+        self.linear_text = nn.Linear(text_dim, dim)
+
+        self.self_blocks = nn.ModuleList([
+            Block(
+                dim = dim, 
+                num_heads = num_heads, 
+                mlp_ratio = mlp_ratio, 
+                qkv_bias = qkv_bias, 
+                drop = drop, 
+                attn_drop = attn_drop, 
+                init_values = init_values, 
+                drop_path = drop_path, 
+                act_layer = act_layer, 
+                norm_layer = norm_layer, 
+                causal = causal
+            ) for i in range(depth)
+        ])
+
+        self.classifier = ClassiferLayer(dim, 2)
+
+    def forward(self, x):
+        # positional embedding, may cause device error
+        _, N, _ = x.shape
+        x = self.linear_text(x)
+        x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim = 1)
+        x = x + positional_embedding(N + 1, self.dim).to(x.device)
+
+        for block in self.self_blocks:
+            x = block(x)
+        # x = self.sT(x)
+        return self.classifier(x[:,0])
+    
+class sT_cCl(nn.Module):
+    """
+    self attention on text
+    cross attention from client to text
+    """
+    def __init__(self, dim = 512, depth = 6, num_heads = 8, mlp_ratio = 4, 
+                 qkv_bias = False, drop = 0, attn_drop = 0, init_values = 1e-5, 
+                 drop_path = False, act_layer = nn.ReLU, norm_layer = nn.LayerNorm, causal = False):
+        super().__init__()
+        self.dim = dim
+        self.depth = depth
+        self.num_heads = num_heads
+
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.dim))
+
+        text_dim = 769
+        client_dim = 674
+        self.linear_text = nn.Linear(text_dim, dim)
+        self.linear_client = nn.Linear(client_dim, dim)
+
+        self.self_blocks = nn.ModuleList([
+            Block(
+                dim = dim, 
+                num_heads = num_heads, 
+                mlp_ratio = mlp_ratio, 
+                qkv_bias = qkv_bias, 
+                drop = drop, 
+                attn_drop = attn_drop, 
+                init_values = init_values, 
+                drop_path = drop_path, 
+                act_layer = act_layer, 
+                norm_layer = norm_layer, 
+                causal = causal
+            ) for i in range(depth)
+        ])
+
+        self.cl_blocks = nn.ModuleList([Cross_block(   # cross attention from client to text    
+            dim = dim, 
+            num_heads = num_heads, 
+            mlp_ratio = mlp_ratio, 
+            qkv_bias = qkv_bias, 
+            drop = drop, 
+            attn_drop = attn_drop, 
+            init_values = init_values, 
+            drop_path = drop_path, 
+            act_layer = act_layer, 
+            norm_layer = norm_layer, 
+            causal = causal
+        ) for i in range(depth)])
+
+        self.classifier = ClassiferLayer(dim, 2)
+
+    def forward(self, x, y):
+        # positional embedding, may cause device error
+        _, N, _ = x.shape
+        x = self.linear_text(x)
+        x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim = 1)
+        x = x + positional_embedding(N + 1, self.dim).to(x.device)
+
+        _, M, _ = y.shape
+        y = self.linear_client(y) + positional_embedding(M, self.dim).to(y.device)
+
+        for block in self.self_blocks:
+            x = block(x)
+        for block in self.cl_blocks:
+            x = block(x, y)
+
+        return self.classifier(x[:,0])
 
 if __name__ == "__main__":
     a = torch.rand((5,5,769))
