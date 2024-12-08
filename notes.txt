@@ -1,4 +1,5 @@
 python src/train.py  -m hparams_search=baseline_optuna trainer=gpu model=sTcClcCo logger=wandb
+python src/train.py  -m hparams_search=baseline_optuna trainer=gpu model=baseline logger=wandb_baseline
 hyperparameter search 
 python train.py -m hparams_search=baseline_optuna trainer=gpu
 
