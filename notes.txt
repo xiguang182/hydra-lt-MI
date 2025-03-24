@@ -1,7 +1,10 @@
 python src/train.py  -m hparams_search=baseline_optuna trainer=gpu model=sTcClcCo logger=wandb
-python src/train.py  -m hparams_search=baseline_optuna trainer=gpu model=baseline logger=wandb_baseline
+
 hyperparameter search 
 python train.py -m hparams_search=baseline_optuna trainer=gpu
 
 # gradient clipping may be enabled to avoid exploding gradients
 python train.py +trainer.gradient_clip_val=0.5
+
+# baseline with grid search
+python src/train.py -m hparams_search=baseline_optuna trainer=gpu model=LSTMTcClcCo logger=wandb_LSTMAttnHybrid +trainer.gradient_clip_val=0.5

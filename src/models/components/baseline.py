@@ -1,3 +1,8 @@
+"""
+baseline
+lstm hidden state is used as output for RoBERTa, client and counselor openfoace features
+"""
+
 import torch
 from torch import nn
 
@@ -131,6 +136,7 @@ class BaseLineModel(nn.Module):
         super().__init__()
         self.linear_client = LinearLayer(600, 200)
         self.linear_counselor = LinearLayer(600, 200)
+        # 200 + 200 + 600 = 1000
         self.linear_preclasifier = LinearLayer(1000, 300)
         self.bilstm_RoBERTa = BiLSTMLayer(
             input_size=769,
