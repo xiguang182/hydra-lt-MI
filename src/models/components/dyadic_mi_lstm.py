@@ -22,7 +22,7 @@ class BiLSTMLayer(nn.Module):
     """A BiLSTM layer.
     In the case of the base line: 
     There are BiLSTM layers with 300 hidden units.
-
+    return the hidden state of the last layer
     dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1
     """
 
@@ -40,6 +40,7 @@ class BiLSTMLayer(nn.Module):
         :param num_layers: The number of LSTM layers.
         :param dropout: The dropout rate.
         """
+        self.hidden_size = hidden_size
         super().__init__()
         self.bilstm = nn.LSTM(
             input_size=input_size,
@@ -59,8 +60,14 @@ class BiLSTMLayer(nn.Module):
         # hiden state and cell state are not used
         # x, (_, _) = self.bilstm(x)
         # the base line uses the hidden layer as the output
-        _, (x, _) = self.bilstm(x)
-        return x
+        ret, (hid_state, _) = self.bilstm(x)
+        # change the shape to B, Bi * num_layers, hidden_size
+        hid_state = hid_state.permute(1,0,2)     
+        # # manually batch first B, Sequence length, Bi * hidden_size
+        # ret = ret.permute(1,0,2)
+        # take the forward sequence of LSTM output
+        ret = ret[:,:,0: self.hidden_size]
+        return (hid_state, ret)
     
 
 class CrossAttention(nn.Module):
@@ -111,7 +118,9 @@ class CrossAttention(nn.Module):
         B, N, P = x.shape
         _, M, _ = y.shape
         assert P == self.dim, 'dimension dismatch'
-        
+        if False:
+            print(f"X shape: {x.shape}")
+            print(f"Y shape: {y.shape}")
         # B N H P then permute B H N P
         q = self.q(x).reshape(B, N, self.num_heads, P).permute(0,2,1,3)
         # B N 2 H P then permute 2 B H M P
@@ -418,8 +427,7 @@ class LSTMT_cCl_cCo_Model(nn.Module):
 
 
     def forward(self, x, y, z):
-        lstm_ret = self.bilstm_RoBERTa(x)
-        lstm_ret = lstm_ret.permute(1,0,2)
+        lstm_ret = self.bilstm_RoBERTa(x)[0]
         lstm_ret = lstm_ret.flatten(start_dim=1)
         
         # positional embedding, may cause device error
@@ -443,6 +451,92 @@ class LSTMT_cCl_cCo_Model(nn.Module):
 
         return self.classifier(x)
     
+
+class LSTMT_lstmT_cCl_cCo_Model(nn.Module):
+    """ 
+    LSTM on text, take hidden state as stream 1, take output as stream 2,
+    cross attention from client to stream 2, 
+    cross attention from counseller to stream 2,
+    """
+    def __init__(self, dim = 512, depth = 1, num_heads = 8, mlp_ratio = 4, 
+                 qkv_bias = False, drop = 0, attn_drop = 0, init_values = 1e-5, 
+                 drop_path = False, act_layer = nn.ReLU, norm_layer = nn.LayerNorm, causal = False):
+        super().__init__()
+        self.dim = dim
+        self.depth = depth
+        self.num_heads = num_heads
+
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.dim))
+
+        text_dim = 769
+        client_dim = 674
+        counseller_dim = 674
+        self.linear_client = nn.Linear(client_dim, dim)
+        self.linear_counseller = nn.Linear(counseller_dim, dim)
+
+
+        self.bilstm_RoBERTa = BiLSTMLayer(
+            input_size=text_dim,
+            hidden_size=dim,
+            num_layers=1,
+        )
+
+
+        self.cl_blocks = nn.ModuleList([Cross_block(   # cross attention from client to text    
+            dim = dim, 
+            num_heads = num_heads, 
+            mlp_ratio = mlp_ratio, 
+            qkv_bias = qkv_bias, 
+            drop = drop, 
+            attn_drop = attn_drop, 
+            init_values = init_values, 
+            drop_path = drop_path, 
+            act_layer = act_layer, 
+            norm_layer = norm_layer, 
+            causal = causal
+        ) for i in range(depth)])
+
+        self.co_blocks = nn.ModuleList([Cross_block(   # cross attention from counseller to text    
+            dim = dim, 
+            num_heads = num_heads, 
+            mlp_ratio = mlp_ratio, 
+            qkv_bias = qkv_bias, 
+            drop = drop, 
+            attn_drop = attn_drop, 
+            init_values = init_values, 
+            drop_path = drop_path, 
+            act_layer = act_layer, 
+            norm_layer = norm_layer, 
+            causal = causal
+        ) for i in range(depth)])
+
+        self.classifier = ClassiferLayer(dim * 3, 2)
+
+
+
+    def forward(self, x, y, z):
+        lstm_hid, lstm_ret = self.bilstm_RoBERTa(x)
+        lstm_hid = lstm_hid.flatten(start_dim=1)
+        
+        # positional embedding, may cause device error
+        _, N, _ = lstm_ret.shape
+        lstm_ret = torch.cat((self.cls_token.expand(lstm_ret.shape[0], -1, -1), lstm_ret), dim = 1)
+        lstm_ret = lstm_ret + positional_embedding(N + 1, self.dim).to(lstm_ret.device)
+        _, M, _ = y.shape
+        y = self.linear_client(y) + positional_embedding(M, self.dim).to(y.device)
+        _, O, _ = z.shape
+        z = self.linear_counseller(z) + positional_embedding(O, self.dim).to(z.device)
+        
+        
+        for block in self.cl_blocks:
+            lstm_ret = block(lstm_ret, y)
+        for block in self.co_blocks:
+            lstm_ret = block(lstm_ret, z)
+        # x = self.sT(x)
+        x = torch.cat((lstm_hid, lstm_ret[:,0]), dim=1)
+
+        return self.classifier(x)
+
 
 class sT(nn.Module):
     """
@@ -565,6 +659,6 @@ if __name__ == "__main__":
     b = torch.rand((5,6,674))
     # model = Cross_block(dim=128, causal=True)
     # output = model(a, b)
-    model = LSTMT_cCl_cCo_Model(dim=128)
+    model = LSTMT_lstmT_cCl_cCo_Model(dim=128)
     output = model(a, b, b)
     print(output.shape)
