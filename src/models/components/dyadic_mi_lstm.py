@@ -346,6 +346,38 @@ class ClassiferLayer(nn.Module):
         """
         return self.softmax(self.linear(x))
 
+class LSTMT(nn.Module):
+    """ 
+    LSTM on text as stream 1, 
+    self attention on text as stream 2,
+    cross attention from client to stream 2, 
+    cross attention from counseller to stream 2,
+    """
+    def __init__(self, dim = 512, depth = 3, num_heads = 8, mlp_ratio = 4, 
+                 qkv_bias = False, drop = 0, attn_drop = 0, init_values = 1e-5, 
+                 drop_path = False, act_layer = nn.ReLU, norm_layer = nn.LayerNorm, causal = False):
+        super().__init__()
+        self.dim = dim
+
+        text_dim = 769
+        client_dim = 674
+        counseller_dim = 674
+
+
+        self.bilstm_RoBERTa = BiLSTMLayer(
+            input_size=text_dim,
+            hidden_size=dim,
+            num_layers=1,
+        )
+
+        self.classifier = ClassiferLayer(dim * 2, 2)
+
+
+
+    def forward(self, x, y, z):
+        lstm_ret = self.bilstm_RoBERTa(x)[0]
+        lstm_ret = lstm_ret.flatten(start_dim=1)
+        return self.classifier(lstm_ret)
 
 class LSTMT_cCl_cCo_Model(nn.Module):
     """ 
@@ -573,7 +605,7 @@ class sT(nn.Module):
 
         self.classifier = ClassiferLayer(dim, 2)
 
-    def forward(self, x):
+    def forward(self, x, _y, _z):
         # positional embedding, may cause device error
         _, N, _ = x.shape
         x = self.linear_text(x)
@@ -659,6 +691,6 @@ if __name__ == "__main__":
     b = torch.rand((5,6,674))
     # model = Cross_block(dim=128, causal=True)
     # output = model(a, b)
-    model = LSTMT_lstmT_cCl_cCo_Model(dim=128)
+    model = LSTMT(dim=128)
     output = model(a, b, b)
     print(output.shape)

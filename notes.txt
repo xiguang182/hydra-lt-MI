@@ -9,3 +9,6 @@ python train.py +trainer.gradient_clip_val=0.5
 # baseline with grid search
 python src/train.py -m hparams_search=baseline_optuna trainer=gpu model=LSTMT_LTcClcCo logger=wandb_LSTMAttnHybrid +trainer.gradient_clip_val=0.5
 python src/train.py -m trainer=gpu model=LSTMT_LTcClcCo
+
+# experiment with grid search
+python src/train.py -m hparams_search=baseline_optuna experiment=LSTM_base 

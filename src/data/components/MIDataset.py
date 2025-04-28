@@ -11,6 +11,12 @@ class CSVDIRDataset(Dataset):
         self.samples = self._make_dataset()
     
     def _make_dataset(self):
+        """
+        Make a list of file paths to the csv files in the root directory
+        get dir list from the root directory
+        get csv file list from each dir and append to the list
+        return the list
+        """
         data = []
         for record_idx, class_dir in enumerate(sorted(os.listdir(self.root))):
             class_path = os.path.join(self.root, class_dir)
@@ -22,6 +28,10 @@ class CSVDIRDataset(Dataset):
         return data
     
     def __getitem__(self, index):
+        """
+        Load the csv file at the index
+        return the data as a numpy array
+        """
         path = self.samples[index]
         sample = self._load_csv(path)
         if self.transform is not None:
@@ -32,6 +42,10 @@ class CSVDIRDataset(Dataset):
         return len(self.samples)
     
     def _load_csv(self, path):
+        """
+        Load the csv file at the path
+        return the data as a numpy array
+        """
         with open(path, 'r') as f:
             reader = csv.reader(f)
             line = next(reader)
@@ -43,7 +57,15 @@ class CSVDIRDataset(Dataset):
 
 # hard coded dataset dir names
 class CompositeMIDataset(Dataset):
-    def __init__(self, root = './data', exclude_counsellor = True, transform=None):
+    """
+    Composite dataset for the MI task
+    The dataset is composed of three datasets
+    1. RoBERTa feature dataset
+    2. OpenFace feature dataset for client
+    3. OpenFace feature dataset for counsellor
+    The dataset is annotated with the MI labels
+    """
+    def __init__(self, root = './data', exclude_counsellor = True, window = 5, transform=None):
         self.root = root
         self.exclude_counsellor = exclude_counsellor
         feature_dir = ['lang_data', 'OpenFace_Client_norm_dir', 'OpenFace_Counselor_norm_dir']
@@ -56,7 +78,7 @@ class CompositeMIDataset(Dataset):
         self.labels, self.dividers = self.make_labels()
         assert len(self.datasets[0]) == len(self.datasets[1]) == len(self.datasets[2]) == len(self.labels), 'all child datasets and labels are from the same experiment data, and should be the same size'
         # the sequence length of the LSTM - 1, i.e. 6 length includes 1 of the target and 5 previous window
-        self.window = 5
+        self.window = window
 
         # the indices of the client data only
         if exclude_counsellor:
@@ -65,6 +87,7 @@ class CompositeMIDataset(Dataset):
 
     def make_labels(self):
         labels = []
+        # the dividers marks the index of the first data of each file/dir
         dividers = [0]
         count = 0
         label_path = os.path.join(self.root, self.labels_dir)
@@ -116,6 +139,7 @@ class CompositeMIDataset(Dataset):
         return: the translated index
         """
         # translate sequences data index to the index of single data
+        # e.g. window = 5, diverders = [0, 6, 12, 18, 24, 30], index = 2, return 17, the actual sequence data indice are 5, 11, 17, 23, 29
         if reverse:
             for divider in self.dividers:
                 if index >= divider:
@@ -138,7 +162,7 @@ class CompositeMIDataset(Dataset):
             # raise ValueError('Index out of range')
         for divider in self.dividers:
             if index < (divider + self.window) and index >= divider:
-                # raise ValueError('Index at the divider, no data')
+                # raise ValueError('Index in the window of a divider, no data')
                 return False
         return True
         
@@ -154,6 +178,7 @@ class CompositeMIDataset(Dataset):
         indices = []
         for i in range(self.dividers[-1]):
             # only append the indices of client annotated as 0
+            # also exclude invalid client indices
             if self.check_index_validity(i):
                 if self.labels[i][0] == 0:
                     indices.append(i)
@@ -164,6 +189,7 @@ class CompositeMIDataset(Dataset):
         # Gather features from each dataset
         # translate the index of the sequences data to the index of single data
         if self.exclude_counsellor:
+            # the actual index of the data
             index = self.indices[index]
         else:
             index = self.index_translation(index, reverse=True)
@@ -172,12 +198,12 @@ class CompositeMIDataset(Dataset):
         f2s = []
         f3s = []
         for i in range(6):
-            f1 = self.datasets[0][index-5+i]
+            f1 = self.datasets[0][index-self.window+i]
             # append speaker id to the feature
             speaker_id = np.array(self.labels[index-i][0], dtype=np.float32)
             f1 = np.append(f1, speaker_id)
-            f2 = self.datasets[1][index-5+i]
-            f3 = self.datasets[2][index-5+i]
+            f2 = self.datasets[1][index-self.window+i]
+            f3 = self.datasets[2][index-self.window+i]
             f1s.append(f1)
             f2s.append(f2)
             f3s.append(f3)
@@ -220,7 +246,7 @@ if __name__ == "__main__":
     cnt2 = 0
     print(d2.count_positive())
     for batch in dl2:
-        print(batch[3])
+        # print(batch[3])
         if batch[3] == 1:
             cnt += 1
         else:
@@ -231,5 +257,5 @@ if __name__ == "__main__":
         # print(batch[3].shape, batch[3])
         # break
 
-    print(cnt)
-    # 12970 out of 23397 are 'change talk' annotated as 1
+    print(cnt, cnt2)
+    # 1801/12232 are 'change talk' annotated as 1
