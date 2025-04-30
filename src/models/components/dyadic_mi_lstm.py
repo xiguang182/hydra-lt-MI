@@ -8,6 +8,7 @@ import torch.nn.functional as f
 import torch.utils.checkpoint
 # from src.models.components.model_helper import 
 import numpy as np
+import os
 def positional_embedding(n, dim):
     pe = torch.zeros(n, dim)
     position = torch.arange(0, n).unsqueeze(1).float()
@@ -316,7 +317,38 @@ class Block(nn.Module):
         # is a mlp layer here necessary?
         x = x + self.drop_path2(self.ls2(self.mlp(self.norm2(x))))
         return x
+    
+class LinearLayer(nn.Module):
+    """A linear layer.
+    In the case of the base line. There are 2 linear layers:
+    one with 600 input features and 200 output features 
+    the other with 800 input features and 300 output features.
+    """
 
+    def __init__(
+            self, 
+            in_features: int = 784, 
+            out_features: int = 10,
+            activation = nn.ReLU,
+        ) -> None:
+        """Initialize a `LinearLayer` module.
+
+        :param in_features: The number of input features.
+        :param out_features: The number of output features.
+        :param activation: The activation function.
+        """
+        super().__init__()
+        self.activation = activation()
+        self.linear = nn.Linear(in_features, out_features)
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Perform a single forward pass through the network.
+
+        :param x: The input tensor.
+        :return: The output tensor.
+        """
+        return self.activation(self.linear(x))
 
 class ClassiferLayer(nn.Module):
     """A classifier layer.
@@ -346,22 +378,17 @@ class ClassiferLayer(nn.Module):
         """
         return self.softmax(self.linear(x))
 
+
+
 class LSTMT(nn.Module):
     """ 
-    LSTM on text as stream 1, 
-    self attention on text as stream 2,
-    cross attention from client to stream 2, 
-    cross attention from counseller to stream 2,
+    LSTM on text alone
     """
-    def __init__(self, dim = 512, depth = 3, num_heads = 8, mlp_ratio = 4, 
-                 qkv_bias = False, drop = 0, attn_drop = 0, init_values = 1e-5, 
-                 drop_path = False, act_layer = nn.ReLU, norm_layer = nn.LayerNorm, causal = False):
+    def __init__(self, dim = 512):
         super().__init__()
         self.dim = dim
 
         text_dim = 769
-        client_dim = 674
-        counseller_dim = 674
 
 
         self.bilstm_RoBERTa = BiLSTMLayer(
@@ -378,6 +405,69 @@ class LSTMT(nn.Module):
         lstm_ret = self.bilstm_RoBERTa(x)[0]
         lstm_ret = lstm_ret.flatten(start_dim=1)
         return self.classifier(lstm_ret)
+
+class LSTMT_LSTMCl(nn.Module):
+    """The base line model. 
+    There are three inputs for the base line model: BiLSTM_Lang+Face
+    1. 6 * (768 RoBERTa feature + 1 speaker ID)
+    2. 6 * 674 openface feature for client 
+    3. 6 * 674 openface feature for conselor
+
+    Parameters sizes are hard coded for baseline model.
+    """
+
+    def __init__(self, dim = 512) -> None:
+        """Initialize a `BaseLineModel` module.
+
+        :param num_classes: The number of classes.
+        :param lstm_input_size: The number of input features for the BiLSTM layer.
+        :param lstm_hidden_size: The number of hidden units for the BiLSTM layer.
+        :param lstm_num_layers: The number of LSTM layers.
+        :param lstm_dropout: The dropout rate for the BiLSTM layer.
+        """
+        super().__init__()
+
+        text_dim = 769
+        client_dim = 674
+        self.linear_client = LinearLayer(dim * 2, dim)
+        # 200 + 200 + 600 = 1000
+        self.linear_preclasifier = LinearLayer(dim * 3, dim)
+        self.bilstm_RoBERTa = BiLSTMLayer(
+            input_size=text_dim,
+            hidden_size=dim,
+            num_layers=1,
+        )
+        self.bilstm_client = BiLSTMLayer(
+            input_size=client_dim,
+            hidden_size=dim,
+            num_layers=1,
+        )
+        self.classifier = ClassiferLayer(dim, 2)
+
+    def forward(self, x1, x2, x3: torch.Tensor) -> torch.Tensor:
+        """Perform a single forward pass through the network.
+
+        :param x: The input tensor.
+        :return: The output tensor.
+        """
+        # unpack inputs or write forward function accepting 3 inputs
+        x_RoBERTa, x_client, x_counselor = x1, x2, x3
+        # RoBERTa
+        # print(x_RoBERTa.shape)
+        x_RoBERTa = self.bilstm_RoBERTa(x_RoBERTa)
+        x_RoBERTa = x_RoBERTa.permute(1,0,2)
+        x_RoBERTa = x_RoBERTa.flatten(start_dim=1)
+        x_client = self.bilstm_client(x_client)
+        x_client = x_client.permute(1,0,2)
+        x_client = x_client.flatten(start_dim=1)
+        # linear layers
+        x_client = self.linear_client(x_client)
+        # print(x_client.shape)
+        # concantenate and linear layer
+        x = torch.cat((x_RoBERTa, x_client), dim=1)
+        x = self.linear_preclasifier(x)
+        # classifier
+        return self.classifier(x)
 
 class LSTMT_cCl_cCo_Model(nn.Module):
     """ 
@@ -492,7 +582,8 @@ class LSTMT_lstmT_cCl_cCo_Model(nn.Module):
     """
     def __init__(self, dim = 512, depth = 1, num_heads = 8, mlp_ratio = 4, 
                  qkv_bias = False, drop = 0, attn_drop = 0, init_values = 1e-5, 
-                 drop_path = False, act_layer = nn.ReLU, norm_layer = nn.LayerNorm, causal = False):
+                 drop_path = False, act_layer = nn.ReLU, norm_layer = nn.LayerNorm, causal = False, 
+                 load_RoBERTa = False, freeze_RoBERTa = False):
         super().__init__()
         self.dim = dim
         self.depth = depth
@@ -513,7 +604,13 @@ class LSTMT_lstmT_cCl_cCo_Model(nn.Module):
             num_layers=1,
         )
 
+        if load_RoBERTa:
+            self.load_RoBERTa_weights()
+            if freeze_RoBERTa:
+                for param in self.bilstm_RoBERTa.parameters():
+                    param.requires_grad = False
 
+        
         self.cl_blocks = nn.ModuleList([Cross_block(   # cross attention from client to text    
             dim = dim, 
             num_heads = num_heads, 
@@ -544,7 +641,172 @@ class LSTMT_lstmT_cCl_cCo_Model(nn.Module):
 
         self.classifier = ClassiferLayer(dim * 3, 2)
 
+    def load_RoBERTa_weights(self, weights_path = None, map_location=None):
+        """
+        Load RoBERTa weights from a checkpoint.
+        :param check_point_path: The path to the checkpoint.
+        """
+        # default/testing path when weights_path is not given.
+        if weights_path is None:
+            pth_name = "Roberta_only.pth"
+            # local debugging path
+            # weights_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "data", "checkpoints", pth_name)
+            
+            # relative path from root direction: where python src/train.py is called.
+            weights_path = os.path.join("data", "checkpoints", pth_name)
+        
+        ReBERTa_layers = ['bilstm']
+        # default map location
+        if map_location is None:
+            map_location = 'cpu'
+        state_dict = torch.load(weights_path, weights_only=True, map_location=map_location)
+        filtered_state_dict = {k: v for k, v in state_dict.items() if any(k.startswith(prefix) for prefix in ReBERTa_layers)}
+        missing_keys, unexpected_keys = self.load_state_dict(filtered_state_dict, strict=False)
+        
+        # debugging
+        if True:
+            print("\nLoaded Layers:")
+            for k in filtered_state_dict.keys():
+                print(f"  - {k}")
 
+            if missing_keys:
+                print("\nMissing Layers (not loaded from checkpoint, randomly initialized):")
+                for k in missing_keys:
+                    print(f"  - {k}")
+
+            if unexpected_keys:
+                print("\nUnexpected keys (checkpoint has these, but model doesn't expect them):")
+                for k in unexpected_keys:
+                    print(f"  - {k}")
+
+    def forward(self, x, y, z):
+        lstm_hid, lstm_ret = self.bilstm_RoBERTa(x)
+        lstm_hid = lstm_hid.flatten(start_dim=1)
+        
+        # positional embedding, may cause device error
+        _, N, _ = lstm_ret.shape
+        lstm_ret = torch.cat((self.cls_token.expand(lstm_ret.shape[0], -1, -1), lstm_ret), dim = 1)
+        lstm_ret = lstm_ret + positional_embedding(N + 1, self.dim).to(lstm_ret.device)
+        _, M, _ = y.shape
+        y = self.linear_client(y) + positional_embedding(M, self.dim).to(y.device)
+        _, O, _ = z.shape
+        z = self.linear_counseller(z) + positional_embedding(O, self.dim).to(z.device)
+        
+        
+        for block in self.cl_blocks:
+            lstm_ret = block(lstm_ret, y)
+        for block in self.co_blocks:
+            lstm_ret = block(lstm_ret, z)
+        # x = self.sT(x)
+        x = torch.cat((lstm_hid, lstm_ret[:,0]), dim=1)
+
+        return self.classifier(x)
+
+# todo
+class LSTMT_Interaction_Model(nn.Module):
+    """ 
+    LSTM on text, take hidden state as stream 1,
+    Interaction refers to the cross attention between client and counseller and vice versa.
+    Instead of a residual connection, the output of the cross attention is taken as the interactoins output.
+    """
+    def __init__(self, dim = 512, depth = 1, num_heads = 8, mlp_ratio = 4, 
+                 qkv_bias = False, drop = 0, attn_drop = 0, init_values = 1e-5, 
+                 drop_path = False, act_layer = nn.ReLU, norm_layer = nn.LayerNorm, causal = False, 
+                 load_RoBERTa = False, freeze_RoBERTa = False):
+        super().__init__()
+        self.dim = dim
+        self.depth = depth
+        self.num_heads = num_heads
+
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.dim))
+
+        text_dim = 769
+        client_dim = 674
+        counseller_dim = 674
+        self.linear_client = nn.Linear(client_dim, dim)
+        self.linear_counseller = nn.Linear(counseller_dim, dim)
+
+
+        self.bilstm_RoBERTa = BiLSTMLayer(
+            input_size=text_dim,
+            hidden_size=dim,
+            num_layers=1,
+        )
+
+        if load_RoBERTa:
+            self.load_RoBERTa_weights()
+            if freeze_RoBERTa:
+                for param in self.bilstm_RoBERTa.parameters():
+                    param.requires_grad = False
+
+        
+        self.cl_blocks = nn.ModuleList([Cross_block(   # cross attention from client to text    
+            dim = dim, 
+            num_heads = num_heads, 
+            mlp_ratio = mlp_ratio, 
+            qkv_bias = qkv_bias, 
+            drop = drop, 
+            attn_drop = attn_drop, 
+            init_values = init_values, 
+            drop_path = drop_path, 
+            act_layer = act_layer, 
+            norm_layer = norm_layer, 
+            causal = causal
+        ) for i in range(depth)])
+
+        self.co_blocks = nn.ModuleList([Cross_block(   # cross attention from counseller to text    
+            dim = dim, 
+            num_heads = num_heads, 
+            mlp_ratio = mlp_ratio, 
+            qkv_bias = qkv_bias, 
+            drop = drop, 
+            attn_drop = attn_drop, 
+            init_values = init_values, 
+            drop_path = drop_path, 
+            act_layer = act_layer, 
+            norm_layer = norm_layer, 
+            causal = causal
+        ) for i in range(depth)])
+
+        self.classifier = ClassiferLayer(dim * 3, 2)
+
+    def load_RoBERTa_weights(self, weights_path = None, map_location=None):
+        """
+        Load RoBERTa weights from a checkpoint.
+        :param check_point_path: The path to the checkpoint.
+        """
+        # default/testing path when weights_path is not given.
+        if weights_path is None:
+            pth_name = "Roberta_only.pth"
+            # local debugging path
+            # weights_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "data", "checkpoints", pth_name)
+            
+            # relative path from root direction: where python src/train.py is called.
+            weights_path = os.path.join("data", "checkpoints", pth_name)
+        
+        ReBERTa_layers = ['bilstm']
+        # default map location
+        if map_location is None:
+            map_location = 'cpu'
+        state_dict = torch.load(weights_path, weights_only=True, map_location=map_location)
+        filtered_state_dict = {k: v for k, v in state_dict.items() if any(k.startswith(prefix) for prefix in ReBERTa_layers)}
+        missing_keys, unexpected_keys = self.load_state_dict(filtered_state_dict, strict=False)
+        
+        # debugging
+        if True:
+            print("\nLoaded Layers:")
+            for k in filtered_state_dict.keys():
+                print(f"  - {k}")
+
+            if missing_keys:
+                print("\nMissing Layers (not loaded from checkpoint, randomly initialized):")
+                for k in missing_keys:
+                    print(f"  - {k}")
+
+            if unexpected_keys:
+                print("\nUnexpected keys (checkpoint has these, but model doesn't expect them):")
+                for k in unexpected_keys:
+                    print(f"  - {k}")
 
     def forward(self, x, y, z):
         lstm_hid, lstm_ret = self.bilstm_RoBERTa(x)
@@ -687,10 +949,33 @@ class sT_cCl(nn.Module):
         return self.classifier(x[:,0])
 
 if __name__ == "__main__":
+    import os
     a = torch.rand((5,5,769))
     b = torch.rand((5,6,674))
-    # model = Cross_block(dim=128, causal=True)
-    # output = model(a, b)
-    model = LSTMT(dim=128)
+    # pth_name = "Roberta_only.pth"
+    # state_dict_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "data", "checkpoints", pth_name)
+    # print(state_dict_path)
+    # state_dict = torch.load(state_dict_path, weights_only= True, map_location='cpu')
+
+    # allowed_prefixes = ['bilstm']
+    # filtered_state_dict = {k: v for k, v in state_dict.items() if any(k.startswith(prefix) for prefix in allowed_prefixes)}
+    # model = LSTMT_cCl_cCo_Model()
+
+    # missing_keys, unexpected_keys = model.load_state_dict(filtered_state_dict, strict=False)
+    # print("\nLoaded Layers:")
+    # for k in filtered_state_dict.keys():
+    #     print(f"  - {k}")
+
+    # if missing_keys:
+    #     print("\nMissing Layers (not loaded from checkpoint, randomly initialized):")
+    #     for k in missing_keys:
+    #         print(f"  - {k}")
+
+    # if unexpected_keys:
+    #     print("\nUnexpected keys (checkpoint has these, but model doesn't expect them):")
+    #     for k in unexpected_keys:
+    #         print(f"  - {k}")
+
+    model = LSTMT_lstmT_cCl_cCo_Model(dim=512, load_RoBERTa=True, freeze_RoBERTa=True)
     output = model(a, b, b)
     print(output.shape)

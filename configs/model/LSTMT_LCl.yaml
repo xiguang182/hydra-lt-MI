@@ -14,7 +14,7 @@ scheduler:
   patience: 10
 
 net:
-  _target_: src.models.components.dyadic_mi_lstm.LSTMT_lstmT_cCl_cCo_Model
+  _target_: src.models.components.dyadic_mi_lstm.LSTMT_LSTMCl
   load_RoBERTa: True
   freeze_RoBERTa: True
 

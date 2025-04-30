@@ -1,20 +1,20 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/train.py experiment=Roberta
-# python src/train.py -m hparams_search=baseline_optuna experiment=Roberta 
+# python train.py experiment=example
+# python src/train.py -m hparams_search=baseline_optuna experiment=LSTMT_LSTM_cross 
 
 defaults:
   - override /data: MI
-  - override /model: LSTMT
+  - override /model: LSTMT_LTcClcCo
   - override /callbacks: default
   - override /trainer: gpu
-  # - override /logger: wandb
+  - override /logger: wandb
 
 # all parameters below will be merged with parameters from default configurations set above
 # this allows you to overwrite only specified parameters
 
-tags: ["Motivational Interview", "Roberta Only LSTM Model"]
+tags: ["Motivational Interview", "Roberta Openface LSTM + cross attention Model"]
 
 seed: 141354
 
@@ -29,6 +29,6 @@ data:
 
 logger:
   wandb:
-    project: "MI Roberta Only"
+    project: "MI LSTMTf_LSTMTCross"
     tags: ${tags}
     group: "MI"

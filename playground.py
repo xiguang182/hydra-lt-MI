@@ -10,56 +10,69 @@ from torch.utils.data import DataLoader
 import csv
 import numpy as np
 
-class MyModel(torch.nn.Module):
-    def __init__(self, test_param: Tuple[int, ...]) -> None:
-        super(MyModel, self).__init__()
-        self.fc1 = torch.nn.Linear(10, 5)
-        self.fc2 = torch.nn.Linear(5, 1)
-        print(f'Initialized with test_param size: {len(test_param)}')
+# class MyModel(torch.nn.Module):
+#     def __init__(self, test_param: Tuple[int, ...]) -> None:
+#         super(MyModel, self).__init__()
+#         self.fc1 = torch.nn.Linear(10, 5)
+#         self.fc2 = torch.nn.Linear(5, 1)
+#         print(f'Initialized with test_param size: {len(test_param)}')
 
-    def forward(self, x1, x2):
-        x = torch.cat((x1, x2), dim=1)
-        x = self.fc1(x)
-        x = self.fc2(x)
-        return x
+#     def forward(self, x1, x2):
+#         x = torch.cat((x1, x2), dim=1)
+#         x = self.fc1(x)
+#         x = self.fc2(x)
+#         return x
 
-model = MyModel((1,2,3,4,5))
+# model = MyModel((1,2,3,4,5))
 
-# Inspect the forward method
-forward_signature = inspect.signature(model.forward)
-print(forward_signature)
+# # Inspect the forward method
+# forward_signature = inspect.signature(model.forward)
+# print(forward_signature)
 
-# Get the number of inputs
-num_inputs = len(forward_signature.parameters)
-print(f"The model takes {num_inputs} inputs.")
+# # Get the number of inputs
+# num_inputs = len(forward_signature.parameters)
+# print(f"The model takes {num_inputs} inputs.")
 
 
 
-# datasetFolder example
-def csv_loader(path):
-    with open(path, 'r') as f:
-        reader = csv.reader(f)
-        line = next(reader)
-        return np.array(line, dtype=np.float32)
-# Define any transformations (if needed)
-# # In this case, we assume no additional transformations are needed
-# transform = None
-class NormalizeTransform:
-    def __call__(self, sample):
-        return (sample - sample.mean()) / sample.std()
+# # datasetFolder example
+# def csv_loader(path):
+#     with open(path, 'r') as f:
+#         reader = csv.reader(f)
+#         line = next(reader)
+#         return np.array(line, dtype=np.float32)
+# # Define any transformations (if needed)
+# # # In this case, we assume no additional transformations are needed
+# # transform = None
+# class NormalizeTransform:
+#     def __call__(self, sample):
+#         return (sample - sample.mean()) / sample.std()
 
-transform = NormalizeTransform()
-# Create the dataset
-path = './data/sample/lang'
-dataset = DatasetFolder(root=path, loader=csv_loader, extensions=('csv'),transform=transform)
+# transform = NormalizeTransform()
+# # Create the dataset
+# path = './data/sample/lang'
+# dataset = DatasetFolder(root=path, loader=csv_loader, extensions=('csv'),transform=transform)
 
-# Create DataLoader
-dataloader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=0)
-for data in dataloader:
-    # print(data.shape)
-    # will automatically be add a target tensor, but just zeros
-    print(data[0].shape)
-    break
+# # Create DataLoader
+# dataloader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=0)
+# for data in dataloader:
+#     # print(data.shape)
+#     # will automatically be add a target tensor, but just zeros
+#     print(data[0].shape)
+#     break
 
-for i in range(6):
-    print(i)
+# for i in range(6):
+#     print(i)
+
+import os
+a = torch.rand((5,5,769))
+b = torch.rand((5,6,674))
+checkpoint_path = os.path.join(os.path.dirname(__file__), "data", "checkpoints", "Roberta_only.ckpt")
+print(checkpoint_path)
+checkpoint = torch.load(checkpoint_path, map_location='cpu')
+state_dict = checkpoint['state_dict']
+print(state_dict.keys())
+# Clean up keys if needed
+clean_state_dict = {k.replace("net.", "", 1): v for k, v in state_dict.items()}
+
+print(clean_state_dict.keys())
