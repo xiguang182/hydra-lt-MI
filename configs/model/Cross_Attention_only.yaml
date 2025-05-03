@@ -1,10 +1,10 @@
 _target_: src.models.motivation_interview_module.MILitModule
 
 optimizer:
-  _target_: torch.optim.Adadelta
+  _target_: torch.optim.Adam
   _partial_: true
-  lr: 0.05
-  weight_decay: 0.0
+  lr: 0.0001
+  weight_decay: 0.01
 
 scheduler:
   _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
@@ -14,7 +14,10 @@ scheduler:
   patience: 10
 
 net:
-  _target_: src.models.components.dyadic_mi_lstm.LSTMT_LSTMCl
+  _target_: src.models.components.dyadic_mi_lstm.CrossAttentionModel
+  drop: 0.1
+  attn_drop: 0.05
+  depth: 1
 
 # compile model for faster training with pytorch 2.0
 compile: false

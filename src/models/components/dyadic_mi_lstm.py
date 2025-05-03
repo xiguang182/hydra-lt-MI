@@ -11,8 +11,8 @@ import numpy as np
 import os
 def positional_embedding(n, dim):
     pe = torch.zeros(n, dim)
-    position = torch.arange(0, n).unsqueeze(1).float()
-    div_term = torch.exp(torch.arange(0, dim, 2).float() * -(np.log(10000.0) / dim))
+    position = torch.arange(0, n, dtype=torch.float).unsqueeze(1)
+    div_term = torch.exp(torch.arange(0, dim, 2).float() * -(torch.log(torch.tensor(10000.0)) / dim))
     pe[:, 0::2] = torch.sin(position * div_term)
     pe[:, 1::2] = torch.cos(position * div_term)
     return pe
@@ -25,6 +25,7 @@ class BiLSTMLayer(nn.Module):
     There are BiLSTM layers with 300 hidden units.
     return the hidden state of the last layer
     dropout option adds dropout after all but last recurrent layer, so non-zero dropout expects num_layers greater than 1
+    return (hidden state, output)
     """
 
     def __init__(
@@ -360,6 +361,9 @@ class ClassiferLayer(nn.Module):
             self, 
             in_features: int = 300, 
             out_features: int = 2,
+            ifsoftmax = True,
+            act_layer = nn.ReLU,
+            drop = 0.1,
         ) -> None:
         """Initialize a `ClassiferLayer` module.
 
@@ -367,7 +371,14 @@ class ClassiferLayer(nn.Module):
         :param out_features: The number of output features.
         """
         super().__init__()
-        self.linear = nn.Linear(in_features, out_features)
+        self.mlp = Mlp(
+            in_features=in_features,
+            hidden_features=int(in_features / 2),
+            out_features=out_features,
+            act_layer=act_layer,
+            drop=drop
+        )
+        self.ifsoftmax = ifsoftmax
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -376,10 +387,14 @@ class ClassiferLayer(nn.Module):
         :param x: The input tensor.
         :return: The output tensor.
         """
-        return self.softmax(self.linear(x))
+        x = self.mlp(x)
+        if self.ifsoftmax:
+            return self.softmax(x)
+        else:
+            return x
 
 
-
+# used for pretrained weights
 class LSTMT(nn.Module):
     """ 
     LSTM on text alone
@@ -406,14 +421,11 @@ class LSTMT(nn.Module):
         lstm_ret = lstm_ret.flatten(start_dim=1)
         return self.classifier(lstm_ret)
 
+# used for pretrained weights
 class LSTMT_LSTMCl(nn.Module):
     """The base line model. 
-    There are three inputs for the base line model: BiLSTM_Lang+Face
     1. 6 * (768 RoBERTa feature + 1 speaker ID)
     2. 6 * 674 openface feature for client 
-    3. 6 * 674 openface feature for conselor
-
-    Parameters sizes are hard coded for baseline model.
     """
 
     def __init__(self, dim = 512) -> None:
@@ -454,11 +466,9 @@ class LSTMT_LSTMCl(nn.Module):
         x_RoBERTa, x_client, x_counselor = x1, x2, x3
         # RoBERTa
         # print(x_RoBERTa.shape)
-        x_RoBERTa = self.bilstm_RoBERTa(x_RoBERTa)
-        x_RoBERTa = x_RoBERTa.permute(1,0,2)
+        x_RoBERTa = self.bilstm_RoBERTa(x_RoBERTa)[0]
         x_RoBERTa = x_RoBERTa.flatten(start_dim=1)
-        x_client = self.bilstm_client(x_client)
-        x_client = x_client.permute(1,0,2)
+        x_client = self.bilstm_client(x_client)[0]
         x_client = x_client.flatten(start_dim=1)
         # linear layers
         x_client = self.linear_client(x_client)
@@ -468,6 +478,93 @@ class LSTMT_LSTMCl(nn.Module):
         x = self.linear_preclasifier(x)
         # classifier
         return self.classifier(x)
+
+# used for pretrained weights, as the second stream
+class CrossAttentionModel(nn.Module):
+    """ 
+    cross attention from client to text,
+    cross attention from counseller to text,
+    """
+    def __init__(self, dim = 512, depth = 3, num_heads = 8, mlp_ratio = 4, 
+                 qkv_bias = False, drop = 0, attn_drop = 0, init_values = 1e-5, 
+                 drop_path = False, act_layer = nn.ReLU, norm_layer = nn.LayerNorm, causal = False):
+        super().__init__()
+        self.dim = dim
+        self.depth = depth
+        self.num_heads = num_heads
+        self.max_len = 100
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.dim))
+
+        pe = positional_embedding(self.max_len, dim)  # [max_len, dim]
+        self.register_buffer('pos_embed', pe)  # torch.Tensor, not a Parameter
+
+        
+        text_dim = 769
+        client_dim = 674
+        counseller_dim = 674
+
+        # unify the dim of the input features
+        self.linear_text = nn.Linear(text_dim, dim)
+        self.linear_client = nn.Linear(client_dim, dim)
+        self.linear_counseller = nn.Linear(counseller_dim, dim)
+
+        self.cl_blocks = nn.ModuleList([Cross_block(   # cross attention from client to text    
+            dim = dim, 
+            num_heads = num_heads, 
+            mlp_ratio = mlp_ratio, 
+            qkv_bias = qkv_bias, 
+            drop = drop, 
+            attn_drop = attn_drop, 
+            init_values = init_values, 
+            drop_path = drop_path, 
+            act_layer = act_layer, 
+            norm_layer = norm_layer, 
+            causal = causal
+        ) for i in range(depth)])
+
+        self.co_blocks = nn.ModuleList([Cross_block(   # cross attention from counseller to text    
+            dim = dim, 
+            num_heads = num_heads, 
+            mlp_ratio = mlp_ratio, 
+            qkv_bias = qkv_bias, 
+            drop = drop, 
+            attn_drop = attn_drop, 
+            init_values = init_values, 
+            drop_path = drop_path, 
+            act_layer = act_layer, 
+            norm_layer = norm_layer, 
+            causal = causal
+        ) for i in range(depth)])
+
+        self.final_norm = norm_layer(dim)
+        self.classifier = ClassiferLayer(dim, 2, ifsoftmax=False, act_layer=act_layer, drop=drop)
+
+    def forward(self, x, y, z):
+        # positional embedding, may cause device error
+        _, N, _ = x.shape
+        assert N+1 <= self.max_len, f"Input too long: {N + 1} > {self.max_len}"
+
+        x = self.linear_text(x)
+        x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim = 1)
+        # x = x + positional_embedding(N + 1, self.dim).to(x.device)
+        x = x + self.pos_embed[:N+1].to(x.device) 
+        _, M, _ = y.shape
+        y = self.linear_client(y) + self.pos_embed[:M].to(y.device)
+        # y = self.linear_client(y) + positional_embedding(M, self.dim).to(y.device)
+        _, O, _ = z.shape
+        z = self.linear_counseller(z) + self.pos_embed[:O].to(z.device)
+        # z = self.linear_counseller(z) + positional_embedding(O, self.dim).to(z.device)
+        
+        for block in self.cl_blocks:
+            x = block(x, y)
+        for block in self.co_blocks:
+            x = block(x, z)
+        # x = self.sT(x)
+        x = self.final_norm(x)
+        x = x[:,0]
+
+        return self.classifier(x)
+    
 
 class LSTMT_cCl_cCo_Model(nn.Module):
     """ 
