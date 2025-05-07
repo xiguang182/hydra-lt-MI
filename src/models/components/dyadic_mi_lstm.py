@@ -217,7 +217,6 @@ class Attention(nn.Module):
         self.causal = causal
 
         self.multihead_qkv = nn.Linear(self.dim, self.out_channel * 3, bias = qkv_bias)
-        self.qkv = nn.Linear(self.out_channel, self.out_channel * 3, bias = qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(self.out_channel, self.dim)
         self.proj_drop = nn.Dropout(proj_drop)
@@ -388,6 +387,7 @@ class ClassiferLayer(nn.Module):
         :return: The output tensor.
         """
         x = self.mlp(x)
+        
         if self.ifsoftmax:
             return self.softmax(x)
         else:
@@ -412,7 +412,7 @@ class LSTMT(nn.Module):
             num_layers=1,
         )
 
-        self.classifier = ClassiferLayer(dim * 2, 2)
+        self.classifier = ClassiferLayer(dim * 2, 2,ifsoftmax=False)
 
 
 
@@ -507,7 +507,21 @@ class CrossAttentionModel(nn.Module):
         self.linear_text = nn.Linear(text_dim, dim)
         self.linear_client = nn.Linear(client_dim, dim)
         self.linear_counseller = nn.Linear(counseller_dim, dim)
-
+        self.self_blocks = nn.ModuleList([
+            Block(
+                dim = dim, 
+                num_heads = num_heads, 
+                mlp_ratio = mlp_ratio, 
+                qkv_bias = qkv_bias, 
+                drop = drop, 
+                attn_drop = attn_drop, 
+                init_values = init_values, 
+                drop_path = drop_path, 
+                act_layer = act_layer, 
+                norm_layer = norm_layer, 
+                causal = causal
+            ) for i in range(depth)
+        ])
         self.cl_blocks = nn.ModuleList([Cross_block(   # cross attention from client to text    
             dim = dim, 
             num_heads = num_heads, 
@@ -547,22 +561,25 @@ class CrossAttentionModel(nn.Module):
         x = self.linear_text(x)
         x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim = 1)
         # x = x + positional_embedding(N + 1, self.dim).to(x.device)
-        x = x + self.pos_embed[:N+1].to(x.device) 
-        _, M, _ = y.shape
-        y = self.linear_client(y) + self.pos_embed[:M].to(y.device)
+        # x = x + self.pos_embed[:N+1].to(x.device) 
+        # _, M, _ = y.shape
+        # y = self.linear_client(y) + self.pos_embed[:M].to(y.device)
         # y = self.linear_client(y) + positional_embedding(M, self.dim).to(y.device)
-        _, O, _ = z.shape
-        z = self.linear_counseller(z) + self.pos_embed[:O].to(z.device)
+        # _, O, _ = z.shape
+        # z = self.linear_counseller(z) + self.pos_embed[:O].to(z.device)
         # z = self.linear_counseller(z) + positional_embedding(O, self.dim).to(z.device)
         
-        for block in self.cl_blocks:
-            x = block(x, y)
-        for block in self.co_blocks:
-            x = block(x, z)
+        # for block in self.cl_blocks:
+        #     x = block(x, y)
+        # for block in self.co_blocks:
+        #     x = block(x, z)
         # x = self.sT(x)
-        x = self.final_norm(x)
+        for block in self.self_blocks:
+            x = block(x)
+        # x = x.flatten(start_dim=-2)
+        # x = self.final_norm(x)
         x = x[:,0]
-
+        print(x[0])
         return self.classifier(x)
     
 

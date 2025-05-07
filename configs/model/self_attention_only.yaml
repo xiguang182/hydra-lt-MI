@@ -14,11 +14,7 @@ scheduler:
   patience: 10
 
 net:
-  # _target_: src.models.components.dyadic_mi_lstm.CrossAttentionModel
-  _target_: src.models.components.dyadic_mi_lstm.SelfAttentionClassifier
-  # drop: 0
-  # attn_drop: 0
-  # depth: 1
+  _target_: src.models.components.attention_models.SA_RoBERTa
 
 # compile model for faster training with pytorch 2.0
 compile: false

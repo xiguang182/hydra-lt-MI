@@ -66,7 +66,9 @@ class MILitModule(LightningModule):
         # add class_weights to the loss function
 
         self.class_weights = torch.tensor([1.0, class_weights])
+        smoothed_weights = self.class_weights / self.class_weights.sum()
         self.criterion = torch.nn.CrossEntropyLoss(weight=self.class_weights)
+        # self.criterion = torch.nn.CrossEntropyLoss(weight=smoothed_weights)
 
         # metric objects for calculating and averaging accuracy across batches
         self.train_acc = Accuracy(task="multiclass", num_classes=2)
@@ -104,7 +106,7 @@ class MILitModule(LightningModule):
         print(self.net)
 
     def on_train_start(self) -> None:
-        print("on_train_start called")
+        # print("on_train_start called")
         self.net.to(self.device)
         """Lightning hook that is called when training begins."""
         # by default lightning executes validation step sanity checks before training starts,
@@ -140,8 +142,10 @@ class MILitModule(LightningModule):
         x1, x2, x3, y = batch
         logits = self.forward(x1, x2, x3)
         loss = self.criterion(logits, y)
-        # print(logits)
         preds = torch.argmax(logits, dim=1)
+
+        # print(logits,preds,y)
+        # print(f"Loss function weights: {self.criterion.weight}")
         return loss, preds, y
 
     def training_step(
@@ -157,22 +161,33 @@ class MILitModule(LightningModule):
         loss, preds, targets = self.model_step(batch)
 
         # update and log metrics
-        self.train_loss(loss)
-        self.train_acc(preds, targets)
-        self.train_f1(preds, targets)
+        self.train_loss.update(loss)
+        self.train_acc.update(preds, targets)
+        self.train_f1.update(preds, targets)
         # print(self.train_f1.compute(),self.train_f1[0])
         # tensor([0.0833, 0.6944], device='cuda:0') CompositionalMetric<lambda>(MulticlassF1Score(),None))
         self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("train/acc", self.train_acc, on_step=False, on_epoch=True, prog_bar=True)
-        # 1 is 'change talk' and 0 is 'sustain talk'
-        self.log("train/f1_change_talk", self.train_f1.compute()[1], on_step=False, on_epoch=True, prog_bar=True)
-        self.log("train/f1_sustain_talk", self.train_f1.compute()[0], on_step=False, on_epoch=True, prog_bar=True)
-        # return loss or backpropagation will fail
+
         return loss
 
     def on_train_epoch_end(self) -> None:
         "Lightning hook that is called when a training epoch ends."
-        pass
+        f1_per_class = self.train_f1.compute()
+        acc = self.train_acc.compute()  # get current train acc
+        
+        # log each class's F1 explicitly
+        self.log("train/f1_sustain_talk", f1_per_class[0], prog_bar=True)
+        self.log("train/f1_change_talk", f1_per_class[1], prog_bar=True)
+
+        self.log("train/loss", self.train_loss.compute(), prog_bar=True)
+        self.log("train/acc", acc, prog_bar=True)
+
+        # reset running metrics
+        self.train_loss.reset()
+        self.train_acc.reset()
+        self.train_f1.reset()
+
 
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int) -> None:
         """Perform a single validation step on a batch of data from the validation set.
@@ -186,29 +201,49 @@ class MILitModule(LightningModule):
         # print('preds',preds)
         # print('label',targets)
 
-        # update and log metrics
-        self.val_loss(loss)
-        self.val_acc(preds, targets)
-        self.val_f1(preds, targets)
+        # update metrics
+        self.val_loss.update(loss)
+        self.val_acc.update(preds, targets)
+        self.val_f1.update(preds, targets)
+
+        # log running metrics (Lightning will call .compute() at epoch end)
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val/f1_change_talk", self.val_f1.compute()[1], on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val/f1_sustain_talk", self.val_f1.compute()[0], on_step=False, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self) -> None:
         "Lightning hook that is called when a validation epoch ends."
+        # compute once
+        f1_per_class = self.val_f1.compute()
         acc = self.val_acc.compute()  # get current val acc
         self.val_acc_best(acc)  # update best so far val acc
         
-        f1 = self.val_f1.compute()
-        self.val_f1_change_best(f1[1])
-        self.val_f1_sustain_best(f1[0])
-        # log `val_acc_best` as a value through `.compute()` method, instead of as a metric object
-        # otherwise metric would be reset by lightning after each epoch
-        self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=True)
+        # log each class's F1 explicitly
+        self.log("val/f1_sustain_talk", f1_per_class[0], prog_bar=True)
+        self.log("val/f1_change_talk", f1_per_class[1], prog_bar=True)
 
+        # update best metrics
+        
+        self.val_f1_sustain_best(f1_per_class[0])
+        self.val_f1_change_best(f1_per_class[1])
         self.log("val/f1_change_talk_best", self.val_f1_change_best.compute(), sync_dist=True, prog_bar=True)
         self.log("val/f1_sustain_talk_best", self.val_f1_sustain_best.compute(), sync_dist=True, prog_bar=True)
+
+        self.log("val/loss", self.val_loss.compute(), prog_bar=True)
+        self.log("val/acc", acc, prog_bar=True)
+
+        self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=True)
+
+        # reset running metrics
+        self.val_loss.reset()
+        self.val_acc.reset()
+        self.val_f1.reset()
+
+        # log `val_acc_best` as a value through `.compute()` method, instead of as a metric object
+        # otherwise metric would be reset by lightning after each epoch
+        
+
+        
+        
 
     def test_step(self, batch: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int) -> None:
         """Perform a single test step on a batch of data from the test set.
@@ -220,18 +255,27 @@ class MILitModule(LightningModule):
         loss, preds, targets = self.model_step(batch)
         
         # update and log metrics
-        self.test_loss(loss)
-        self.test_acc(preds, targets)
+
+        self.test_loss.update(loss)
+        self.test_acc.update(preds, targets)
+        self.test_f1.update(preds, targets)
+
         self.log("test/loss", self.test_loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, prog_bar=True)
 
-        self.test_f1(preds, targets)
-        self.log("test/f1_change_talk", self.test_f1.compute()[1], on_step=False, on_epoch=True, prog_bar=True)
-        self.log("test/f1_sustain_talk", self.test_f1.compute()[0], on_step=False, on_epoch=True, prog_bar=True)
+        
 
     def on_test_epoch_end(self) -> None:
         """Lightning hook that is called when a test epoch ends."""
-        pass
+        f1_per_class = self.test_f1.compute()
+        acc = self.test_acc.compute()  # get current train acc
+        
+        # log each class's F1 explicitly
+        self.log("test/f1_sustain_talk", f1_per_class[0], prog_bar=True)
+        self.log("test/f1_change_talk", f1_per_class[1], prog_bar=True)
+
+        self.log("test/loss", self.test_loss.compute(), prog_bar=True)
+        self.log("test/acc", acc, prog_bar=True)
 
     def setup(self, stage: str) -> None:
         """Lightning hook that is called at the beginning of fit (train + validate), validate,

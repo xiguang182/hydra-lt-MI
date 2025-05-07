@@ -46,8 +46,8 @@ hydra:
     # define hyperparameter search space
     # lower lr for transformer models
     params:
-      model.class_weights: interval(5.0, 9.0)
-      model.optimizer.lr: choice(1e-5, 3e-5, 1e-4, 3e-4, 5e-4)
+      model.class_weights: interval(5.0, 8.0)
+      model.optimizer.lr: choice(1e-5, 3e-5, 1e-4, 3e-4, 1e-3)
       # model.optimizer.lr:
       #   type: float
       #   low: 1e-5
