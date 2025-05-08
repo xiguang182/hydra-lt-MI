@@ -6,7 +6,7 @@
 
 defaults:
   - override /data: MI
-  - override /model: Cross_Attention_only
+  - override /model: SA_CA
   - override /callbacks: default
   - override /trainer: gpu
   - override /logger: wandb

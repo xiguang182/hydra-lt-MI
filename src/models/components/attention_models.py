@@ -166,10 +166,10 @@ class CrossAttention(nn.Module):
         # Apply output projection
         output = self.out_proj(output)
         
-        return output, attn_weights if need_weights else None
+        return output, attn_weights if need_weights else (output, None)
 
-
-class CA_model(nn.Module):
+# self-atten -> cross-atten
+class SA_CA(nn.Module):
     def __init__(self, RoBETa_dim=769, openFace_dim=674,  model_dim=256, num_heads=4, num_classes=2, dropout=0.1):
         super().__init__()
         
@@ -184,15 +184,24 @@ class CA_model(nn.Module):
         self.openface_proj = nn.Linear(openFace_dim, model_dim)
         # pre-atten norm
         self.pre_attn_norm_x = nn.LayerNorm(model_dim)
+        self.pre_attn_norm_x2 = nn.LayerNorm(model_dim)
         self.pre_attn_norm_y = nn.LayerNorm(model_dim)
         # Multi-head self-attention
-        self.attn = CrossAttention(embed_dim=model_dim, num_heads=num_heads)
+        self.self_attn = nn.MultiheadAttention(embed_dim=model_dim, num_heads=num_heads, batch_first=True)
+        self.cross_attn = CrossAttention(embed_dim=model_dim, num_heads=num_heads)
         
         # Post-attention processing
         ## pre-MLP norm
         self.pre_mlp_norm = nn.LayerNorm(model_dim)
+        self.pre_mlp_norm2 = nn.LayerNorm(model_dim)
         self.dropout = nn.Dropout(dropout)
         self.mlp = nn.Sequential(
+            nn.Linear(model_dim, model_dim),
+            nn.ReLU(),
+            nn.Linear(model_dim, model_dim)
+        )
+
+        self.mlp2 = nn.Sequential(
             nn.Linear(model_dim, model_dim),
             nn.ReLU(),
             nn.Linear(model_dim, model_dim)
@@ -217,14 +226,21 @@ class CA_model(nn.Module):
         y_proj = y_proj + self.pos_embed[:N, :].unsqueeze(0)
         # Self-attention
         x_proj = self.pre_attn_norm_x(x_proj)
-        y_proj = self.pre_attn_norm_y(y_proj)
-        attn_out, _ = self.attn(query=x_proj, key=y_proj, value=y_proj) 
+        self_attn_out, _ = self.self_attn(x_proj, x_proj, x_proj)
         # Residual + dropout
-        x_res = x_proj + self.dropout(attn_out)
+        x_res = x_proj + self.dropout(self_attn_out)
         x_res = self.pre_mlp_norm(x_res)
-        x_mlp = x_res + self.dropout(self.mlp(x_res))
+        x_mlp1 = x_res + self.dropout(self.mlp(x_res))
+        # Cross-attention
+        x_mlp1 = self.pre_attn_norm_x2(x_mlp1)
+        y_proj = self.pre_attn_norm_y(y_proj)
+        cross_attn_out, _ = self.cross_attn(query=x_mlp1, key=y_proj, value=y_proj) 
+        # Residual + dropout
+        x_res = x_mlp1 + self.dropout(cross_attn_out)
+        x_res = self.pre_mlp_norm2(x_res)
+        x_mlp2 = x_res + self.dropout(self.mlp2(x_res))
         
-        pooled = x_mlp.mean(dim=1)
+        pooled = x_mlp2.mean(dim=1)
         # Classify
         logits = self.classifier(pooled)
         # (B, num_classes)
