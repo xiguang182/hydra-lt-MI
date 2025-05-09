@@ -12,7 +12,69 @@ def positional_embedding(n, dim):
     pe[:, 1::2] = torch.cos(position * div_term)
     return pe
 
+class LateFusionModule(nn.Module):
+    def __init__(self, model_dim, fusion_type='concat'):
+        super(LateFusionModule, self).__init__()
+        self.fusion_type = fusion_type
+        self.model_dim = model_dim
+        
+        # Initialize fusion-specific parameters
+        if fusion_type == 'attention':
+            self.attention = nn.Linear(model_dim, 1)
+        elif fusion_type == 'bilinear':
+            self.bilinear = nn.Bilinear(model_dim, model_dim, model_dim)
+        elif fusion_type == 'gated':
+            self.gate = nn.Linear(model_dim * 2, model_dim)
+        elif fusion_type == 'fnn':
+            self.fnn = nn.Sequential(
+                nn.Linear(model_dim * 2, model_dim),
+                nn.ReLU(),
+                nn.Linear(model_dim, model_dim)
+            )
+        
+    def forward(self, output1, output2):
+        # Simple fusion strategies
+        if self.fusion_type == 'concat':
+            fused = torch.cat([output1, output2], dim=1)
+        elif self.fusion_type == 'sum':
+            fused = output1 + output2
+        elif self.fusion_type == 'max':
+            fused = torch.max(torch.stack([output1, output2]), dim=0)[0]
+        elif self.fusion_type == 'avg':
+            fused = (output1 + output2) / 2
+        elif self.fusion_type == 'mul':
+            fused = output1 * output2
+            
+        # More sophisticated fusion strategies
+        elif self.fusion_type == 'attention':
+            # Attention-based fusion
+            a1 = self.attention(output1)
+            a2 = self.attention(output2)
+            attention = F.softmax(torch.cat([a1, a2], dim=1), dim=1)
+            fused = attention[:, 0].unsqueeze(1) * output1 + attention[:, 1].unsqueeze(1) * output2
+        elif self.fusion_type == 'bilinear':
+            # Bilinear fusion
+            fused = self.bilinear(output1, output2)
+        elif self.fusion_type == 'gated':
+            # Gated fusion
+            concat = torch.cat([output1, output2], dim=1)
+            gate = torch.sigmoid(self.gate(concat))
+            fused = gate * output1 + (1 - gate) * output2
+        elif self.fusion_type == 'fnn':
+            # Feed-forward network fusion
+            concat = torch.cat([output1, output2], dim=1)
+            fused = self.fnn(concat)
+        
+        return fused
     
+    @property
+    def output_dim(self):
+        """Return the dimension of the fused output"""
+        if self.fusion_type == 'concat':
+            return self.model_dim * 2
+        else:
+            return self.model_dim
+
 class CrossAttention(nn.Module):
     """
     Causal Cross-Attention Module that implements the functionality of nn.MultiheadAttention
@@ -162,11 +224,98 @@ class CrossAttention(nn.Module):
         # Transpose and reshape the output
         # [batch_size, num_heads, tgt_len, head_dim] -> [batch_size, tgt_len, num_heads, head_dim]
         output = output.transpose(1, 2).contiguous().view(bsz, tgt_len, self.embed_dim)
-        
+            
         # Apply output projection
         output = self.out_proj(output)
         
         return output, attn_weights if need_weights else (output, None)
+
+# stream1 -> self-atten
+# stream2 -> self-atten -> cross-atten
+class SA_SACA(nn.Module):
+    def __init__(self, RoBETa_dim=769, openFace_dim=674,  model_dim=256, num_heads=4, num_classes=2, dropout=0.1):
+        super().__init__()
+        
+        self.model_dim = model_dim
+        self.max_len = 512  # Maximum sequence length
+        pe = positional_embedding(self.max_len, model_dim)  # [max_len, dim]
+        self.register_buffer('pos_embed', pe)  # torch.Tensor, not a Parameter
+
+        
+        # Project RoBERTa to model dimension
+        self.RoBERTa_proj = nn.Linear(RoBETa_dim, model_dim)
+        self.openface_proj = nn.Linear(openFace_dim, model_dim)
+        # pre-atten norm
+        self.pre_attn_norm_x = nn.LayerNorm(model_dim)
+        self.pre_attn_norm_x2 = nn.LayerNorm(model_dim)
+        self.pre_attn_norm_y = nn.LayerNorm(model_dim)
+        # Multi-head self-attention
+        self.self_attn = nn.MultiheadAttention(embed_dim=model_dim, num_heads=num_heads, batch_first=True)
+        self.cross_attn = CrossAttention(embed_dim=model_dim, num_heads=num_heads)
+        
+        # Post-attention processing
+        ## pre-MLP norm
+        self.pre_mlp_norm = nn.LayerNorm(model_dim)
+        self.pre_mlp_norm2 = nn.LayerNorm(model_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.mlp = nn.Sequential(
+            nn.Linear(model_dim, model_dim),
+            nn.ReLU(),
+            nn.Linear(model_dim, model_dim)
+        )
+
+        self.mlp2 = nn.Sequential(
+            nn.Linear(model_dim, model_dim),
+            nn.ReLU(),
+            nn.Linear(model_dim, model_dim)
+        )
+        fusion_type = 'concat'
+        # Late fusion module
+        self.fusion = LateFusionModule(model_dim, fusion_type=fusion_type)
+        # Final classifier
+        if fusion_type == 'concat':
+            self.classifier = nn.Linear(model_dim * 2, num_classes)
+        else:
+            self.classifier = nn.Linear(model_dim, num_classes)
+
+    def forward(self, x, y, z):
+        """
+        x: Tensor of shape (batch_size, seq_len, input_dim)
+        y: Tensor of shape (batch_size, seq_len, input_dim)
+        z: unused, for lightning model compatibility
+        """
+        # Project input
+        x_proj = self.RoBERTa_proj(x)
+        y_proj = self.openface_proj(y)
+        # (B, N, model_dim)
+        B, N, _ = x_proj.shape
+        # Add positional embedding
+        x_proj = x_proj + self.pos_embed[:N, :].unsqueeze(0)
+        y_proj = y_proj + self.pos_embed[:N, :].unsqueeze(0)
+        # Self-attention
+        x_proj = self.pre_attn_norm_x(x_proj)
+        self_attn_out, _ = self.self_attn(x_proj, x_proj, x_proj)
+        # Residual + dropout
+        x_res = x_proj + self.dropout(self_attn_out)
+        x_res = self.pre_mlp_norm(x_res)
+        x_mlp1 = x_res + self.dropout(self.mlp(x_res))
+        # Cross-attention
+        pooled1 = x_mlp1.mean(dim=1)
+        x_mlp1 = self.pre_attn_norm_x2(x_mlp1)
+        y_proj = self.pre_attn_norm_y(y_proj)
+        cross_attn_out, _ = self.cross_attn(query=x_mlp1, key=y_proj, value=y_proj) 
+        # Residual + dropout
+        x_res = x_mlp1 + self.dropout(cross_attn_out)
+        x_res = self.pre_mlp_norm2(x_res)
+        # with residual
+        x_mlp2 = x_res + self.dropout(self.mlp2(x_res))
+        
+        pooled2 = x_mlp2.mean(dim=1)
+        fused = self.fusion(pooled1, pooled2)
+        # Classify
+        logits = self.classifier(fused)
+        # (B, num_classes)
+        return logits
 
 # self-atten -> cross-atten
 class SA_CA(nn.Module):

@@ -1,12 +1,12 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/train.py experiment=Cross_Attention
-# python src/train.py -m hparams_search=attn_optuna experiment=Cross_Attention 
+# python src/train.py experiment=SA_SACA
+# python src/train.py -m hparams_search=attn_optuna experiment=SA_SACA 
 
 defaults:
   - override /data: MI
-  - override /model: SA_CA
+  - override /model: SA_SACA
   - override /callbacks: default
   - override /trainer: gpu
   - override /logger: wandb
@@ -30,6 +30,6 @@ data:
 
 logger:
   wandb:
-    project: "SA roberta + cross attention client"
+    project: "SA roberta + SA Roberta cross attention client two streams"
     tags: ${tags}
     group: "MI"
